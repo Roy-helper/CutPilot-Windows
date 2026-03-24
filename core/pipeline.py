@@ -117,6 +117,7 @@ async def _run_asr(
             start_sec=seg.start,
             end_sec=seg.end,
             text=seg.text,
+            speaker_id=getattr(seg, "speaker", None),
         )
         for i, seg in enumerate(segments)
     ]

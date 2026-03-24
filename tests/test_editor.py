@@ -97,6 +97,8 @@ class TestCutVersions:
         config = MagicMock()
         config.output_dir = str(tmp_path)
         config.generate_fast = False
+        config.enable_hook_overlay = False
+        config.video_quality = "standard"
 
         with patch("core.editor.rough_cut", new_callable=AsyncMock, return_value=mock_cut_result):
             results = await cut_versions(
@@ -126,6 +128,8 @@ class TestCutVersions:
         config = MagicMock()
         config.output_dir = str(tmp_path)
         config.generate_fast = True
+        config.enable_hook_overlay = False
+        config.video_quality = "standard"
 
         with (
             patch("core.editor.rough_cut", new_callable=AsyncMock, return_value=mock_cut_result),

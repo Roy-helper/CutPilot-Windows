@@ -16,8 +16,8 @@ from typing import Any
 from moviepy import VideoFileClip, concatenate_videoclips
 from pydantic import BaseModel
 
-from core.config import CutPilotConfig
-from core.models import Sentence, ScriptVersion
+from core.config import CutPilotConfig, QUALITY_PRESETS
+from core.models import ExportOptions, Sentence, ScriptVersion
 from core.overlay import burn_hook_overlay
 
 logger = logging.getLogger(__name__)
@@ -46,63 +46,105 @@ async def cut_versions(
     versions: list[ScriptVersion],
     sentences: list[Sentence],
     config: CutPilotConfig,
+    export_options: list[ExportOptions] | None = None,
 ) -> list[dict]:
-    """Cut all versions from source video.
+    """Cut selected versions from source video.
 
-    For each version:
-    1. Map sentence_ids -> (start_sec, end_sec) via sentence lookup
-    2. Call rough_cut() to produce normal speed version
-    3. If config.generate_fast, produce 1.25x speed variant via FFmpeg
+    For each version, respects export options (if provided) to decide:
+    - Whether to produce normal and/or fast speed variants
+    - Whether to apply hook overlay
+    - Which video quality preset to use
+
+    If export_options is None, falls back to config defaults (all versions,
+    normal + fast if generate_fast, hook if enabled, standard quality).
 
     Returns:
-        list of {"version_id": int, "path": str, "speed": str}
+        list of {"version_id": int, "path": str, "speed": str, "quality": str}
     """
     sentence_map: dict[int, Sentence] = {s.id: s for s in sentences}
     output_dir = Path(config.output_dir) if config.output_dir else video_path.parent / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = video_path.stem
 
+    # Build options lookup — default if not provided
+    opts_map: dict[int, ExportOptions] = {}
+    if export_options:
+        opts_map = {o.version_id: o for o in export_options}
+
     results: list[dict] = []
     for version in versions:
+        opts = opts_map.get(version.version_id)
+        if opts is None:
+            # Default: export normal, fast if config says so, hook if config says so
+            opts = ExportOptions(
+                version_id=version.version_id,
+                export_normal=True,
+                export_fast=config.generate_fast,
+                enable_hook=config.enable_hook_overlay,
+                video_quality=config.video_quality,
+            )
+
+        if not opts.export_normal and not opts.export_fast:
+            continue
+
         time_spans = _resolve_time_spans(version.sentence_ids, sentence_map)
         if not time_spans:
             logger.warning("Version %d: no valid time spans, skipping", version.version_id)
             continue
 
-        normal_path = str(output_dir / f"{stem}_v{version.version_id}.mp4")
-        cut = await rough_cut(str(video_path), time_spans, normal_path)
-        if not cut.success:
-            logger.error("Version %d cut failed: %s", version.version_id, cut.error)
-            continue
+        quality = opts.video_quality
 
-        # Apply hook text overlay if enabled and cover_title is present.
-        final_normal = await _maybe_apply_overlay(
-            normal_path, version.cover_title, config,
-        )
+        # Normal speed
+        if opts.export_normal:
+            normal_path = str(output_dir / f"{stem}_v{version.version_id}.mp4")
+            cut = await rough_cut(str(video_path), time_spans, normal_path, quality)
+            if cut.success:
+                final_normal = normal_path
+                if opts.enable_hook and version.cover_title.strip():
+                    final_normal = await _maybe_apply_overlay(
+                        normal_path, version.cover_title, config,
+                    )
+                results.append({
+                    "version_id": version.version_id,
+                    "path": final_normal,
+                    "speed": "normal",
+                    "quality": quality,
+                })
+            else:
+                logger.error("Version %d cut failed: %s", version.version_id, cut.error)
+                continue
 
-        results.append({
-            "version_id": version.version_id,
-            "path": final_normal,
-            "speed": "normal",
-        })
+        # 1.25x speed
+        if opts.export_fast:
+            source_for_fast = normal_path if opts.export_normal else None
+            if source_for_fast is None:
+                # Need to cut normal first as source for speed-up
+                normal_path = str(output_dir / f"{stem}_v{version.version_id}_tmp.mp4")
+                cut = await rough_cut(str(video_path), time_spans, normal_path, quality)
+                if not cut.success:
+                    logger.error("Version %d cut failed: %s", version.version_id, cut.error)
+                    continue
+                source_for_fast = normal_path
 
-        if config.generate_fast:
             fast_path = str(output_dir / f"{stem}_v{version.version_id}_fast.mp4")
             try:
                 await _run_ffmpeg(
-                    "-y", "-i", final_normal,
+                    "-y", "-i", source_for_fast,
                     "-filter_complex",
                     "[0:v]setpts=0.8*PTS[v];[0:a]atempo=1.25[a]",
                     "-map", "[v]", "-map", "[a]",
                     fast_path,
                 )
-                final_fast = await _maybe_apply_overlay(
-                    fast_path, version.cover_title, config,
-                )
+                final_fast = fast_path
+                if opts.enable_hook and version.cover_title.strip():
+                    final_fast = await _maybe_apply_overlay(
+                        fast_path, version.cover_title, config,
+                    )
                 results.append({
                     "version_id": version.version_id,
                     "path": final_fast,
                     "speed": "fast",
+                    "quality": quality,
                 })
             except RuntimeError as exc:
                 logger.error("Version %d fast variant failed: %s", version.version_id, exc)
@@ -114,6 +156,7 @@ async def rough_cut(
     source_path: str,
     time_spans: list[tuple[float, float]],
     output_path: str,
+    quality: str = "standard",
 ) -> CutResult:
     """Execute rough cut using MoviePy in-memory concatenation.
 
@@ -135,7 +178,7 @@ async def rough_cut(
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
         await asyncio.to_thread(
-            _moviepy_cut_and_concat, source_path, time_spans, output_path,
+            _moviepy_cut_and_concat, source_path, time_spans, output_path, quality,
         )
 
         probe = await _validate_output(output_path)
@@ -163,8 +206,10 @@ def _moviepy_cut_and_concat(
     source_path: str,
     time_spans: list[tuple[float, float]],
     output_path: str,
+    quality: str = "standard",
 ) -> None:
     """Load source once, subclip each span, concatenate, write output."""
+    preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["standard"])
     video = VideoFileClip(source_path)
     try:
         clips = []
@@ -185,7 +230,7 @@ def _moviepy_cut_and_concat(
                 fps=video.fps or 30,
                 codec="libx264",
                 audio_codec="aac",
-                ffmpeg_params=["-crf", "18", "-preset", "ultrafast", "-pix_fmt", "yuv420p"],
+                ffmpeg_params=["-crf", preset["crf"], "-preset", preset["preset"], "-pix_fmt", "yuv420p"],
                 logger=None,
             )
         finally:

@@ -66,6 +66,23 @@ class ProcessResult(BaseModel):
     output_files: list[dict] = Field(default_factory=list)
 
 
+class ExportOptions(BaseModel):
+    """User-selected export options per version.
+
+    Controls what gets exported — hook overlay, speed variants, quality.
+    Used by the UI to let users pick before export, instead of dumping
+    everything.
+    """
+
+    model_config = {"frozen": True}
+
+    version_id: int
+    export_normal: bool = True
+    export_fast: bool = False
+    enable_hook: bool = False
+    video_quality: str = "standard"  # draft / standard / high
+
+
 class PipelineState(BaseModel):
     """Tracks pipeline progress for cache/resume."""
 

@@ -28,6 +28,7 @@ class TranscriptSegment(BaseModel):
     start: float
     end: float
     text: str
+    speaker: str | None = None
 
 
 def _get_local_model():
@@ -41,15 +42,30 @@ def _get_local_model():
             from funasr import AutoModel
             import torch
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info("Loading FunASR model (device=%s)...", device)
-            _local_model = AutoModel(
-                model="paraformer-zh",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
-                device=device,
-                disable_update=True,
-            )
-            logger.info("FunASR model loaded successfully")
+            logger.info("Loading FunASR SeACo-Paraformer with speaker model (device=%s)...", device)
+            try:
+                _local_model = AutoModel(
+                    model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+                    vad_model="fsmn-vad",
+                    punc_model="ct-punc",
+                    spk_model="cam++",
+                    device=device,
+                    disable_update=True,
+                )
+                logger.info("FunASR SeACo-Paraformer with speaker model loaded successfully")
+            except Exception as spk_exc:
+                logger.warning(
+                    "SeACo-Paraformer with speaker model failed, falling back to paraformer-zh: %s",
+                    spk_exc,
+                )
+                _local_model = AutoModel(
+                    model="paraformer-zh",
+                    vad_model="fsmn-vad",
+                    punc_model="ct-punc",
+                    device=device,
+                    disable_update=True,
+                )
+                logger.info("FunASR paraformer-zh fallback loaded successfully")
         except Exception as exc:
             logger.warning("FunASR local model unavailable: %s", exc)
             _local_model = None
@@ -83,10 +99,13 @@ def _transcribe_local(
     sentence_info = result_data.get("sentence_info")
     if sentence_info:
         for item in sentence_info:
+            spk_raw = item.get("spk", None)
+            speaker = str(spk_raw) if spk_raw is not None else None
             segments.append(TranscriptSegment(
                 start=item["start"] / 1000.0,
                 end=item["end"] / 1000.0,
                 text=item["text"].strip(),
+                speaker=speaker,
             ))
         return segments
 
