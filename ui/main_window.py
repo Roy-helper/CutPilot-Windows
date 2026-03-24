@@ -4,19 +4,24 @@ Dark-themed professional desktop UI for e-commerce video automation.
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QProgressBar, QListWidget,
-    QListWidgetItem, QFrame, QFileDialog, QScrollArea,
-    QStatusBar, QApplication,
+    QListWidgetItem, QFrame, QFileDialog,
+    QStatusBar, QMessageBox,
 )
 
+from core.config import CutPilotConfig
+from core.models import ProcessResult
+from core.pipeline import generate_copy_text
 from ui.styles import DARK_THEME
 from ui.drop_zone import DropZone
 from ui.result_panel import ResultPanel
+from ui.worker import PipelineWorker
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +33,11 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 700)
         self.resize(1280, 800)
         self.setStyleSheet(DARK_THEME)
+
+        self._video_files: list[Path] = []
+        self._output_dir: Path | None = None
+        self._results: dict[str, ProcessResult] = {}
+        self._worker: PipelineWorker | None = None
 
         self._setup_ui()
         self._setup_statusbar()
@@ -129,14 +139,12 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(progress_frame)
 
-        # State
-        self._video_files: list[Path] = []
-        self._output_dir: Path | None = None
-
     def _setup_statusbar(self):
         status = QStatusBar()
         status.showMessage("CutPilot v0.1.0 — 拖入视频开始使用")
         self.setStatusBar(status)
+
+    # ── File management ──
 
     def _on_files_dropped(self, file_paths: list[str]):
         """Handle files dropped onto the drop zone."""
@@ -161,16 +169,81 @@ class MainWindow(QMainWindow):
                 display = "..." + display[-32:]
             self.output_label.setText(f"输出目录: {display}")
 
+    # ── Pipeline ──
+
     def _on_generate(self):
         """Start processing all imported videos."""
         if not self._video_files:
             return
 
-        # TODO: Implement pipeline worker thread
+        config = CutPilotConfig()
+        if not config.api_key:
+            QMessageBox.warning(
+                self, "缺少 API Key",
+                "请在 .env 文件中设置 CUTPILOT_API_KEY",
+            )
+            return
+
         self.generate_btn.setEnabled(False)
-        self.progress_label.setText("处理中...")
-        self.progress_bar.setValue(10)
-        self.statusBar().showMessage("正在处理视频...")
+        self.export_btn.setEnabled(False)
+        self.result_panel.clear()
+        self._results.clear()
+
+        self._worker = PipelineWorker(self._video_files, config)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.video_done.connect(self._on_video_done)
+        self._worker.all_done.connect(self._on_all_done)
+        self._worker.error.connect(self._on_worker_error)
+        self._worker.start()
+
+    def _on_progress(self, label: str, percent: int):
+        """Update progress bar from worker signal."""
+        self.progress_label.setText(label)
+        self.progress_bar.setValue(percent)
+        self.statusBar().showMessage(label)
+
+    def _on_video_done(self, filename: str, result: ProcessResult):
+        """Handle one video completion."""
+        self._results[filename] = result
+
+        # Update file list icon
+        for i in range(self.file_list.count()):
+            item = self.file_list.item(i)
+            if item and filename in item.text():
+                icon = "✓" if result.success else "✗"
+                item.setText(f"{icon}  {filename}")
+                break
+
+        # Show results in panel
+        if result.success:
+            product_name = Path(filename).stem
+            self.result_panel.show_versions(product_name, result.versions)
+        else:
+            self.statusBar().showMessage(f"{filename}: {result.error}")
+
+    def _on_all_done(self):
+        """Handle all videos processed."""
+        self._worker = None
+        self.generate_btn.setEnabled(True)
+
+        success_count = sum(1 for r in self._results.values() if r.success)
+        total = len(self._results)
+        self.statusBar().showMessage(
+            f"处理完成: {success_count}/{total} 个视频成功"
+        )
+
+        if success_count > 0:
+            self.export_btn.setEnabled(True)
+
+    def _on_worker_error(self, error_msg: str):
+        """Handle fatal worker error."""
+        self._worker = None
+        self.generate_btn.setEnabled(True)
+        self.progress_label.setText("错误")
+        self.progress_bar.setValue(0)
+        QMessageBox.critical(self, "处理失败", error_msg)
+
+    # ── Export ──
 
     def _on_export(self):
         """Export all processed videos to output directory."""
@@ -179,5 +252,27 @@ class MainWindow(QMainWindow):
         if self._output_dir is None:
             return
 
-        # TODO: Implement export logic
-        self.statusBar().showMessage(f"已导出到 {self._output_dir}")
+        exported = 0
+        for filename, result in self._results.items():
+            if not result.success:
+                continue
+
+            product_name = Path(filename).stem
+            product_dir = self._output_dir / product_name
+            product_dir.mkdir(parents=True, exist_ok=True)
+
+            # Copy video files
+            for f in result.output_files:
+                src = Path(f["path"])
+                if src.exists():
+                    dst = product_dir / src.name
+                    shutil.copy2(str(src), str(dst))
+                    exported += 1
+
+            # Write copy text
+            copy_text = generate_copy_text(result.versions)
+            (product_dir / "文案.txt").write_text(copy_text, encoding="utf-8")
+
+        self.statusBar().showMessage(
+            f"已导出 {exported} 个视频到 {self._output_dir}"
+        )

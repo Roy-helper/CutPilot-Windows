@@ -6,6 +6,7 @@ Falls back to HTTP API if local model unavailable.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +14,10 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded local model singleton
+# Lazy-loaded local model singleton (thread-safe)
 _local_model = None
 _model_load_attempted = False
+_model_lock = threading.Lock()
 
 
 class TranscriptSegment(BaseModel):
@@ -29,37 +31,50 @@ class TranscriptSegment(BaseModel):
 
 
 def _get_local_model():
-    """Lazy-load FunASR model (singleton). Returns None if unavailable."""
+    """Lazy-load FunASR model (singleton, thread-safe). Returns None if unavailable."""
     global _local_model, _model_load_attempted
-    if _model_load_attempted:
+    with _model_lock:
+        if _model_load_attempted:
+            return _local_model
+        _model_load_attempted = True
+        try:
+            from funasr import AutoModel
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info("Loading FunASR model (device=%s)...", device)
+            _local_model = AutoModel(
+                model="paraformer-zh",
+                vad_model="fsmn-vad",
+                punc_model="ct-punc",
+                device=device,
+                disable_update=True,
+            )
+            logger.info("FunASR model loaded successfully")
+        except Exception as exc:
+            logger.warning("FunASR local model unavailable: %s", exc)
+            _local_model = None
         return _local_model
-    _model_load_attempted = True
-    try:
-        from funasr import AutoModel
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info("Loading FunASR model (device=%s)...", device)
-        _local_model = AutoModel(
-            model="paraformer-zh",
-            vad_model="fsmn-vad",
-            punc_model="ct-punc",
-            device=device,
-            disable_update=True,
-        )
-        logger.info("FunASR model loaded successfully")
-    except Exception as exc:
-        logger.warning("FunASR local model unavailable: %s", exc)
-        _local_model = None
-    return _local_model
 
 
-def _transcribe_local(video_path: str) -> list[TranscriptSegment]:
+def _transcribe_local(
+    video_path: str,
+    hotwords: str = "",
+) -> list[TranscriptSegment]:
     """Transcribe using local FunASR model (VF1 mode — fast)."""
     model = _get_local_model()
     if model is None:
         raise RuntimeError("Local FunASR model not available")
 
-    res = model.generate(input=video_path, batch_size_s=60, use_itn=True)
+    if hotwords:
+        try:
+            res = model.generate(
+                input=video_path, batch_size_s=60, use_itn=True, hotword=hotwords,
+            )
+        except TypeError:
+            logger.warning("FunASR version does not support hotword, falling back")
+            res = model.generate(input=video_path, batch_size_s=60, use_itn=True)
+    else:
+        res = model.generate(input=video_path, batch_size_s=60, use_itn=True)
     result_data = res[0]
 
     segments: list[TranscriptSegment] = []
@@ -124,12 +139,14 @@ def _transcribe_local(video_path: str) -> list[TranscriptSegment]:
 async def transcribe_video(
     video_path: str,
     funasr_url: str = "http://localhost:10095",
+    hotwords: str = "",
 ) -> list[TranscriptSegment]:
     """Transcribe video — uses local model (fast) with HTTP fallback.
 
     Args:
         video_path: Path to the input video file.
         funasr_url: Base URL of FunASR HTTP API (fallback only).
+        hotwords: Space-separated hotwords to boost recognition accuracy.
 
     Returns:
         List of TranscriptSegment objects.
@@ -140,7 +157,7 @@ async def transcribe_video(
 
     # Try local model first (10x faster than HTTP)
     try:
-        result = _transcribe_local(video_path)
+        result = _transcribe_local(video_path, hotwords=hotwords)
         if result:
             return result
     except Exception as exc:
@@ -170,7 +187,10 @@ async def _transcribe_http(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await process.communicate()
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        error_msg = stderr.decode().strip() if stderr else "Unknown error"
+        raise RuntimeError(f"ffmpeg audio extraction failed: {error_msg}")
 
     try:
         api_url = f"{funasr_url}/api/asr"
