@@ -1,0 +1,25 @@
+[project]
+name = "cutpilot"
+version = "0.1.0"
+description = "CutPilot — AI 副驾驶 | 电商短视频智能剪辑工具"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "openai>=1.0.0",
+    "httpx>=0.28.0",
+    "funasr>=1.0.0",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.8.0",
+    "pyinstaller>=6.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

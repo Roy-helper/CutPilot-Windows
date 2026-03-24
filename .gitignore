@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+*.spec
+.venv/
+venv/
+assets/ffmpeg/
+*.mp4
+*.wav
+*.asr.json
