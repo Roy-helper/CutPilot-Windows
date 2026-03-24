@@ -88,14 +88,14 @@ async def _ffmpeg_overlay(
     output_path: Path,
     duration: float,
 ) -> None:
-    """Composite *overlay_path* onto *video_path* with fade in/out."""
+    """Composite *overlay_path* onto *video_path* for first *duration* seconds."""
     fade_out_start = max(0, duration - 0.5)
 
     filter_complex = (
-        f"[0:v][1:v]overlay=(main_w-overlay_w)/2:main_h*0.15:"
-        f"enable='between(t,0.2,{duration})':"
-        f"format=auto,"
-        f"fade=t=out:st={fade_out_start}:d=0.5[out]"
+        f"[1:v]format=rgba,"
+        f"fade=t=out:st={fade_out_start}:d=0.5:alpha=1[ovr];"
+        f"[0:v][ovr]overlay=(main_w-overlay_w)/2:main_h*0.15:"
+        f"enable='between(t,0,{duration})'[out]"
     )
 
     cmd = [
