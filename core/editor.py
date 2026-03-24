@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from core.config import CutPilotConfig
 from core.models import Sentence, ScriptVersion
+from core.overlay import burn_hook_overlay
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +75,14 @@ async def cut_versions(
             logger.error("Version %d cut failed: %s", version.version_id, cut.error)
             continue
 
+        # Apply hook text overlay if enabled and cover_title is present.
+        final_normal = await _maybe_apply_overlay(
+            normal_path, version.cover_title, config,
+        )
+
         results.append({
             "version_id": version.version_id,
-            "path": normal_path,
+            "path": final_normal,
             "speed": "normal",
         })
 
@@ -84,15 +90,18 @@ async def cut_versions(
             fast_path = str(output_dir / f"{stem}_v{version.version_id}_fast.mp4")
             try:
                 await _run_ffmpeg(
-                    "-y", "-i", normal_path,
+                    "-y", "-i", final_normal,
                     "-filter_complex",
                     "[0:v]setpts=0.8*PTS[v];[0:a]atempo=1.25[a]",
                     "-map", "[v]", "-map", "[a]",
                     fast_path,
                 )
+                final_fast = await _maybe_apply_overlay(
+                    fast_path, version.cover_title, config,
+                )
                 results.append({
                     "version_id": version.version_id,
-                    "path": fast_path,
+                    "path": final_fast,
                     "speed": "fast",
                 })
             except RuntimeError as exc:
@@ -240,6 +249,25 @@ async def _run_ffmpeg(*args: str) -> None:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+async def _maybe_apply_overlay(
+    video_path_str: str,
+    cover_title: str,
+    config: CutPilotConfig,
+) -> str:
+    """Apply hook overlay if enabled and cover_title is non-empty.
+
+    Returns the (possibly updated) output path as a string.
+    """
+    if not config.enable_hook_overlay or not cover_title.strip():
+        return video_path_str
+    result = await burn_hook_overlay(
+        Path(video_path_str),
+        cover_title,
+        duration=config.hook_duration,
+    )
+    return str(result)
 
 
 def _resolve_time_spans(

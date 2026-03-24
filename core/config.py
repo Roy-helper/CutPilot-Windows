@@ -23,5 +23,9 @@ class CutPilotConfig(BaseSettings):
     min_sentences: int = 15
     generate_fast: bool = True
 
+    # Hook overlay
+    enable_hook_overlay: bool = True
+    hook_duration: float = 3.0
+
     # Output
     output_dir: str = ""
