@@ -148,6 +148,7 @@ class MainWindow(QMainWindow):
 
     def _on_files_dropped(self, file_paths: list[str]):
         """Handle files dropped onto the drop zone."""
+
         for fp in file_paths:
             path = Path(fp)
             if path.suffix.lower() in (".mp4", ".mov", ".avi", ".mkv", ".flv"):
@@ -173,7 +174,9 @@ class MainWindow(QMainWindow):
 
     def _on_generate(self):
         """Start processing all imported videos."""
+
         if not self._video_files:
+
             return
 
         config = CutPilotConfig()

@@ -124,8 +124,11 @@ class ResultPanel(QFrame):
     def show_versions(self, product_name: str, versions: list[ScriptVersion]):
         """Display version cards for a processed product."""
         # Remove placeholder
-        if self._placeholder:
-            self._placeholder.hide()
+        if self._placeholder is not None:
+            try:
+                self._placeholder.hide()
+            except RuntimeError:
+                self._placeholder = None
 
         # Add product header
         header = QLabel(f"📦 {product_name}")
@@ -140,9 +143,14 @@ class ResultPanel(QFrame):
             self._layout.insertWidget(insert_pos, card)
 
     def clear(self):
-        """Remove all version cards."""
+        """Remove all version cards (preserve placeholder)."""
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._placeholder.show()
+            widget = item.widget()
+            if widget and widget is not self._placeholder:
+                widget.deleteLater()
+        if self._placeholder is not None:
+            try:
+                self._placeholder.show()
+            except RuntimeError:
+                self._placeholder = None
