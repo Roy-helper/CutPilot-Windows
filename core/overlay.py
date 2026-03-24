@@ -25,7 +25,7 @@ def create_hook_image(
     Returns the path to a temporary PNG file (caller must clean up).
     """
     font_path = find_cjk_font()
-    font_size = max(24, int(video_width * 0.05))
+    font_size = max(36, int(video_width * 0.08))
 
     img = render_text_card(
         text,
@@ -89,16 +89,13 @@ async def _ffmpeg_overlay(
     duration: float,
 ) -> None:
     """Composite *overlay_path* onto *video_path* with fade in/out."""
-    fade_in_dur = 0.3
     fade_out_start = max(0, duration - 0.5)
-    fade_out_dur = 0.5
 
     filter_complex = (
-        f"[1:v]format=rgba,"
-        f"fade=t=in:st=0:d={fade_in_dur}:alpha=1,"
-        f"fade=t=out:st={fade_out_start}:d={fade_out_dur}:alpha=1[ovr];"
-        f"[0:v][ovr]overlay=(W-w)/2:H*0.15:"
-        f"enable='between(t,0,{duration})'[out]"
+        f"[0:v][1:v]overlay=(main_w-overlay_w)/2:main_h*0.15:"
+        f"enable='between(t,0.2,{duration})':"
+        f"format=auto,"
+        f"fade=t=out:st={fade_out_start}:d=0.5[out]"
     )
 
     cmd = [

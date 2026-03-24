@@ -77,10 +77,10 @@ def render_text_card(
     padding_h: int = 30,
     padding_v: int = 20,
     corner_radius: int = 20,
-    bg_color: tuple[int, int, int, int] = (255, 255, 255, 240),
-    text_color: tuple[int, int, int] = (0, 0, 0),
-    shadow_offset: int = 4,
-    shadow_blur: int = 4,
+    bg_color: tuple[int, int, int, int] = (0, 0, 0, 200),
+    text_color: tuple[int, int, int] = (255, 255, 255),
+    shadow_offset: int = 5,
+    shadow_blur: int = 6,
 ) -> Image.Image:
     """Render a styled text card as a PIL RGBA Image.
 
