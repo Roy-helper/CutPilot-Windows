@@ -15,7 +15,7 @@ import logging
 import re
 from pathlib import Path
 
-from core.ai_client import call_ai, create_openai_client
+from core.ai_client import create_openai_client
 from core.category_detector import detect_category
 from core.config import CutPilotConfig
 from core.models import ScriptVersion, Sentence
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-_PROMPT_DIR = Path("config/prompts")
+_PROMPT_DIR = Path(__file__).resolve().parent.parent / "config" / "prompts"
 
 
 def _load_prompt_template() -> str:

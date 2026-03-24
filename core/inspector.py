@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 
-_SENSITIVE_WORDS_PATH = Path("config/sensitive_words.json")
-_SYSTEM_PROMPT_PATH = Path("config/prompts/inspector.md")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_SENSITIVE_WORDS_PATH = _PROJECT_ROOT / "config" / "sensitive_words.json"
+_SYSTEM_PROMPT_PATH = _PROJECT_ROOT / "config" / "prompts" / "inspector.md"
 
 # Thresholds
 MIN_SCORE_APPROVED = 50.0
