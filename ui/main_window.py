@@ -122,6 +122,11 @@ class MainWindow(QMainWindow):
         self.export_btn.setEnabled(False)
         sidebar_layout.addWidget(self.export_btn)
 
+        self.clear_btn = QPushButton("清空列表")
+        self.clear_btn.setObjectName("secondaryButton")
+        self.clear_btn.clicked.connect(self._on_clear)
+        sidebar_layout.addWidget(self.clear_btn)
+
         sidebar.setFixedWidth(320)
         body.addWidget(sidebar)
 
@@ -280,10 +285,15 @@ class MainWindow(QMainWindow):
     # ── Export ──
 
     def _on_export(self):
-        """Export all processed videos to output directory."""
+        """Export selected versions to output directory."""
         if self._output_dir is None:
             self._select_output_dir()
         if self._output_dir is None:
+            return
+
+        selections = self.result_panel.get_export_selections()
+        if not selections:
+            self.statusBar().showMessage("未选择任何版本")
             return
 
         exported = 0
@@ -292,21 +302,49 @@ class MainWindow(QMainWindow):
                 continue
 
             product_name = Path(filename).stem
+            opts_list = selections.get(product_name, [])
+            if not opts_list:
+                continue
+
+            selected_ids = {o.version_id for o in opts_list}
             product_dir = self._output_dir / product_name
             product_dir.mkdir(parents=True, exist_ok=True)
 
-            # Copy video files
+            # Copy only files matching selected versions
             for f in result.output_files:
                 src = Path(f["path"])
+                vid = f.get("version_id")
+                if vid not in selected_ids:
+                    continue
                 if src.exists():
                     dst = product_dir / src.name
                     shutil.copy2(str(src), str(dst))
                     exported += 1
 
-            # Write copy text
-            copy_text = generate_copy_text(result.versions)
-            (product_dir / "文案.txt").write_text(copy_text, encoding="utf-8")
+            # Write copy text for selected versions only
+            selected_versions = [
+                v for v in result.versions if v.version_id in selected_ids
+            ]
+            if selected_versions:
+                copy_text = generate_copy_text(selected_versions)
+                (product_dir / "文案.txt").write_text(
+                    copy_text, encoding="utf-8"
+                )
 
         self.statusBar().showMessage(
-            f"已导出 {exported} 个视频到 {self._output_dir}"
+            f"已导出 {exported} 个文件到 {self._output_dir}"
         )
+
+    # ── Clear ──
+
+    def _on_clear(self):
+        """Clear all imported videos, results, and reset UI."""
+        self._video_files.clear()
+        self._results.clear()
+        self.file_list.clear()
+        self.result_panel.clear()
+        self.generate_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
+        self.progress_label.setText("就绪")
+        self.progress_bar.setValue(0)
+        self.statusBar().showMessage("已清空，拖入新视频开始使用")
