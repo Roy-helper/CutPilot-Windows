@@ -18,9 +18,11 @@ from PySide6.QtWidgets import (
 from core.config import CutPilotConfig
 from core.models import ProcessResult
 from core.pipeline import generate_copy_text
+from core.user_settings import build_config_from_settings, load_user_settings
 from ui.styles import DARK_THEME
 from ui.drop_zone import DropZone
 from ui.result_panel import ResultPanel
+from ui.settings_dialog import SettingsDialog
 from ui.worker import PipelineWorker
 
 
@@ -58,6 +60,14 @@ class MainWindow(QMainWindow):
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
+
+        settings_btn = QPushButton("\u2699")
+        settings_btn.setObjectName("settingsButton")
+        settings_btn.setFixedSize(36, 36)
+        settings_btn.setToolTip("设置")
+        settings_btn.clicked.connect(self._open_settings)
+        header.addWidget(settings_btn)
+
         main_layout.addLayout(header)
 
         # ── Body: sidebar + results ──
@@ -106,7 +116,7 @@ class MainWindow(QMainWindow):
         self.generate_btn.setEnabled(False)
         sidebar_layout.addWidget(self.generate_btn)
 
-        self.export_btn = QPushButton("导出全部")
+        self.export_btn = QPushButton("导出选中")
         self.export_btn.setObjectName("secondaryButton")
         self.export_btn.clicked.connect(self._on_export)
         self.export_btn.setEnabled(False)
@@ -117,6 +127,7 @@ class MainWindow(QMainWindow):
 
         # Right results panel
         self.result_panel = ResultPanel()
+        self.result_panel.selection_changed.connect(self._on_selection_changed)
         body.addWidget(self.result_panel, 1)
 
         main_layout.addLayout(body, 1)
@@ -172,27 +183,37 @@ class MainWindow(QMainWindow):
 
     # ── Pipeline ──
 
+    def _open_settings(self) -> None:
+        """Open the settings dialog and reload config on accept."""
+        dialog = SettingsDialog(self)
+        if dialog.exec() == SettingsDialog.Accepted:
+            self.statusBar().showMessage("设置已保存")
+
     def _on_generate(self):
         """Start processing all imported videos."""
 
         if not self._video_files:
-
             return
 
-        config = CutPilotConfig()
+        config = build_config_from_settings()
         if not config.api_key:
-            QMessageBox.warning(
-                self, "缺少 API Key",
-                "请在 .env 文件中设置 CUTPILOT_API_KEY",
-            )
-            return
+            self._open_settings()
+            # Re-check after dialog
+            config = build_config_from_settings()
+            if not config.api_key:
+                return
+
+        settings = load_user_settings()
+        hotwords = settings.get("hotwords", "")
 
         self.generate_btn.setEnabled(False)
         self.export_btn.setEnabled(False)
         self.result_panel.clear()
         self._results.clear()
 
-        self._worker = PipelineWorker(self._video_files, config)
+        self._worker = PipelineWorker(
+            self._video_files, config, hotwords=hotwords,
+        )
         self._worker.progress.connect(self._on_progress)
         self._worker.video_done.connect(self._on_video_done)
         self._worker.all_done.connect(self._on_all_done)
@@ -231,12 +252,22 @@ class MainWindow(QMainWindow):
 
         success_count = sum(1 for r in self._results.values() if r.success)
         total = len(self._results)
+        selected = self.result_panel.get_selected_count()
+        version_total = self.result_panel.get_total_count()
         self.statusBar().showMessage(
-            f"处理完成: {success_count}/{total} 个视频成功"
+            f"处理完成: {success_count}/{total} 个视频成功 "
+            f"| 已选择 {selected}/{version_total} 个版本"
         )
 
         if success_count > 0:
             self.export_btn.setEnabled(True)
+
+    def _on_selection_changed(self, selected: int, total: int):
+        """Update status bar when version selection changes."""
+        if total > 0:
+            self.statusBar().showMessage(
+                f"已选择 {selected}/{total} 个版本"
+            )
 
     def _on_worker_error(self, error_msg: str):
         """Handle fatal worker error."""

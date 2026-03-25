@@ -131,6 +131,22 @@ QPushButton#copyButton:hover {
     background-color: #6a4c9c;
 }
 
+/* ── Settings Button ────────────────────────────────── */
+QPushButton#settingsButton {
+    background-color: transparent;
+    color: #7a7a9e;
+    border: 1px solid #0f3460;
+    border-radius: 18px;
+    font-size: 18px;
+    padding: 0px;
+}
+
+QPushButton#settingsButton:hover {
+    color: #e94560;
+    border-color: #e94560;
+    background-color: #e9456020;
+}
+
 /* ── Progress Bar ───────────────────────────────────── */
 QProgressBar {
     background-color: #0f3460;
