@@ -5,6 +5,7 @@ Dark-themed professional desktop UI for e-commerce video automation.
 from __future__ import annotations
 
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -16,15 +17,17 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import CutPilotConfig
+from core.history import HistoryEntry, add_history_entry
 from core.license import check_license, consume_trial, get_trial_remaining
 from core.models import ProcessResult
 from core.pipeline import generate_copy_text
 from core.user_settings import build_config_from_settings, load_user_settings
 from ui.activation_dialog import ActivationDialog
-from ui.styles import DARK_THEME
 from ui.drop_zone import DropZone
+from ui.history_dialog import HistoryDialog
 from ui.result_panel import ResultPanel
 from ui.settings_dialog import SettingsDialog
+from ui.styles import DARK_THEME
 from ui.worker import PipelineWorker
 
 
@@ -64,6 +67,13 @@ class MainWindow(QMainWindow):
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
+
+        history_btn = QPushButton("\U0001f4cb")
+        history_btn.setObjectName("settingsButton")
+        history_btn.setFixedSize(36, 36)
+        history_btn.setToolTip("处理历史")
+        history_btn.clicked.connect(self._open_history)
+        header.addWidget(history_btn)
 
         settings_btn = QPushButton("\u2699")
         settings_btn.setObjectName("settingsButton")
@@ -239,6 +249,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() == SettingsDialog.Accepted:
             self.statusBar().showMessage("设置已保存")
 
+    def _open_history(self) -> None:
+        """Open the processing history dialog."""
+        dialog = HistoryDialog(self)
+        dialog.exec()
+
     def _on_generate(self):
         """Start processing all imported videos."""
 
@@ -312,6 +327,30 @@ class MainWindow(QMainWindow):
             self.result_panel.show_versions(product_name, result.versions)
         else:
             self.statusBar().showMessage(f"{filename}: {result.error}")
+
+        # Record history
+        self._record_history(filename, result)
+
+    def _record_history(self, filename: str, result: ProcessResult) -> None:
+        """Record a processing result to the history log."""
+        # Find the matching video path
+        video_path = ""
+        for vf in self._video_files:
+            if vf.name == filename:
+                video_path = str(vf)
+                break
+
+        entry = HistoryEntry(
+            video_name=filename,
+            video_path=video_path,
+            timestamp=datetime.now(UTC).isoformat(),
+            success=result.success,
+            error=result.error,
+            versions_count=len(result.versions),
+            output_files=[f["path"] for f in result.output_files],
+            approach_tags=[v.approach_tag for v in result.versions if v.approach_tag],
+        )
+        add_history_entry(entry)
 
     def _on_all_done(self):
         """Handle all videos processed."""

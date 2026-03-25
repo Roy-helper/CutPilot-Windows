@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core.config import CutPilotConfig
+from core.providers import get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,10 @@ _SETTINGS_DIR = Path.home() / ".cutpilot"
 _SETTINGS_PATH = _SETTINGS_DIR / "settings.json"
 
 _DEFAULTS: dict[str, Any] = {
+    "provider": "deepseek",
     "api_key": "",
-    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "model": "deepseek-v3",
+    "base_url": "",       # only used when provider="custom"
+    "model": "",          # only used when provider="custom"
     "max_versions": 3,
     "min_sentences": 15,
     "generate_fast": True,
@@ -71,11 +73,23 @@ def build_config_from_settings() -> CutPilotConfig:
     """Build a CutPilotConfig using user settings as overrides.
 
     Priority: user_settings.json > .env > defaults.
+
+    When provider is not "custom", base_url and model are resolved
+    from the provider preset, ignoring any stored base_url / model.
     """
     settings = load_user_settings()
+    provider_id = settings.get("provider", "deepseek")
+    preset = get_provider(provider_id)
+
+    # Resolve base_url / model from preset unless custom
+    resolved = dict(settings)
+    if preset is not None and preset.id != "custom":
+        resolved["base_url"] = preset.base_url
+        resolved["model"] = preset.model
+
     # Only pass non-empty string values and all non-string values
     kwargs: dict[str, Any] = {}
-    for key, value in settings.items():
+    for key, value in resolved.items():
         if key not in CutPilotConfig.model_fields:
             continue
         if isinstance(value, str) and value == "":

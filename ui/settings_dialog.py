@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.license import get_license_info
+from core.providers import PROVIDERS, get_provider, get_provider_names
 from core.user_settings import load_user_settings, save_user_settings
 
 logger = logging.getLogger(__name__)
@@ -218,6 +220,7 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
+        layout.addWidget(self._build_license_group())
         layout.addWidget(self._build_api_group())
         layout.addWidget(self._build_processing_group())
         layout.addWidget(self._build_asr_group())
@@ -226,9 +229,76 @@ class SettingsDialog(QDialog):
 
     # ── Section builders ──
 
+    def _build_license_group(self) -> QGroupBox:
+        group = QGroupBox("授权信息")
+        layout = QVBoxLayout(group)
+
+        info = get_license_info()
+
+        # Machine ID row
+        mid_row = QHBoxLayout()
+        mid_row.addWidget(QLabel("本机标识:"))
+        self._license_machine_edit = QLineEdit(info["machine_id"])
+        self._license_machine_edit.setReadOnly(True)
+        mid_row.addWidget(self._license_machine_edit, 1)
+
+        copy_mid_btn = QPushButton("复制")
+        copy_mid_btn.setObjectName("browseButton")
+        copy_mid_btn.setFixedWidth(50)
+        copy_mid_btn.clicked.connect(self._copy_machine_id)
+        mid_row.addWidget(copy_mid_btn)
+        layout.addLayout(mid_row)
+
+        # Status
+        status_text = "有效" if info["is_valid"] else "未激活"
+        if info["expiry"]:
+            status_text = f"有效，到期: {info['expiry']}"
+        elif info["activation_code"]:
+            status_text = f"已过期 / 无效"
+
+        status_row = QHBoxLayout()
+        status_row.addWidget(QLabel("授权状态:"))
+        status_color = "#4caf50" if info["is_valid"] else "#e94560"
+        status_label = QLabel(status_text)
+        status_label.setStyleSheet(f"color: {status_color}; font-weight: bold;")
+        status_row.addWidget(status_label, 1)
+        layout.addLayout(status_row)
+
+        # Reactivate button
+        reactivate_btn = QPushButton("重新激活")
+        reactivate_btn.setObjectName("testButton")
+        reactivate_btn.clicked.connect(self._on_reactivate)
+        layout.addWidget(reactivate_btn)
+
+        return group
+
+    def _copy_machine_id(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self._license_machine_edit.text())
+
+    def _on_reactivate(self) -> None:
+        from ui.activation_dialog import ActivationDialog
+
+        dialog = ActivationDialog(self)
+        if dialog.exec() == ActivationDialog.Accepted:
+            QMessageBox.information(self, "激活成功", "许可证已更新。")
+
     def _build_api_group(self) -> QGroupBox:
         group = QGroupBox("API 设置")
         layout = QVBoxLayout(group)
+
+        # Provider dropdown
+        layout.addWidget(QLabel("AI 服务商"))
+        self._provider_combo = QComboBox()
+        for _pid, display_name in get_provider_names():
+            self._provider_combo.addItem(display_name)
+        self._provider_combo.currentIndexChanged.connect(
+            self._on_provider_changed,
+        )
+        layout.addWidget(self._provider_combo)
 
         # API Key
         layout.addWidget(QLabel("API Key"))
@@ -251,17 +321,37 @@ class SettingsDialog(QDialog):
         key_row.addWidget(self._test_btn)
         layout.addLayout(key_row)
 
-        # Base URL
-        layout.addWidget(QLabel("API Base URL"))
+        # Base URL (custom only)
+        self._base_url_label = QLabel("API Base URL")
+        layout.addWidget(self._base_url_label)
         self._base_url_edit = QLineEdit()
+        self._base_url_edit.setPlaceholderText(
+            "https://api.example.com/v1",
+        )
         layout.addWidget(self._base_url_edit)
 
-        # Model
-        layout.addWidget(QLabel("模型名称"))
+        # Model (custom only)
+        self._model_label = QLabel("模型名称")
+        layout.addWidget(self._model_label)
         self._model_edit = QLineEdit()
+        self._model_edit.setPlaceholderText("model-name")
         layout.addWidget(self._model_edit)
 
         return group
+
+    def _on_provider_changed(self, index: int) -> None:
+        """Update UI when the selected provider changes."""
+        provider = PROVIDERS[index]
+        is_custom = provider.id == "custom"
+
+        # Show/hide custom fields
+        self._base_url_label.setVisible(is_custom)
+        self._base_url_edit.setVisible(is_custom)
+        self._model_label.setVisible(is_custom)
+        self._model_edit.setVisible(is_custom)
+
+        # Update API key hint
+        self._api_key_edit.setPlaceholderText(provider.api_key_hint)
 
     def _build_processing_group(self) -> QGroupBox:
         group = QGroupBox("处理设置")
@@ -368,9 +458,21 @@ class SettingsDialog(QDialog):
 
     def _load_settings(self) -> None:
         settings = load_user_settings()
+
+        # Provider combo
+        provider_id = settings.get("provider", "deepseek")
+        provider_names = get_provider_names()
+        for idx, (pid, _name) in enumerate(provider_names):
+            if pid == provider_id:
+                self._provider_combo.setCurrentIndex(idx)
+                break
+
         self._api_key_edit.setText(settings.get("api_key", ""))
         self._base_url_edit.setText(settings.get("base_url", ""))
         self._model_edit.setText(settings.get("model", ""))
+
+        # Trigger visibility update
+        self._on_provider_changed(self._provider_combo.currentIndex())
         self._max_versions_spin.setValue(settings.get("max_versions", 3))
         self._min_sentences_spin.setValue(settings.get("min_sentences", 15))
         self._fast_check.setChecked(settings.get("generate_fast", True))
@@ -395,7 +497,11 @@ class SettingsDialog(QDialog):
         quality_idx = self._quality_combo.currentIndex()
         quality_value = _QUALITY_OPTIONS[quality_idx][1]
 
+        provider_idx = self._provider_combo.currentIndex()
+        provider_id = PROVIDERS[provider_idx].id
+
         return {
+            "provider": provider_id,
             "api_key": self._api_key_edit.text().strip(),
             "base_url": self._base_url_edit.text().strip(),
             "model": self._model_edit.text().strip(),
@@ -437,12 +543,24 @@ class SettingsDialog(QDialog):
 
     def _test_connection(self) -> None:
         api_key = self._api_key_edit.text().strip()
-        base_url = self._base_url_edit.text().strip()
-        model = self._model_edit.text().strip()
-
         if not api_key:
             QMessageBox.warning(self, "提示", "请先输入 API Key")
             return
+
+        provider_idx = self._provider_combo.currentIndex()
+        provider = PROVIDERS[provider_idx]
+
+        if provider.id == "custom":
+            base_url = self._base_url_edit.text().strip()
+            model = self._model_edit.text().strip()
+            if not base_url or not model:
+                QMessageBox.warning(
+                    self, "提示", "自定义模式需要填写 Base URL 和模型名称",
+                )
+                return
+        else:
+            base_url = provider.base_url
+            model = provider.model
 
         self._test_btn.setEnabled(False)
         self._test_btn.setText("测试中...")

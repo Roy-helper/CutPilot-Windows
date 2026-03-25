@@ -241,6 +241,25 @@ QPushButton#settingsButton:hover {
     border-color: #e94560;
 }
 
+/* ── Table Widget ──────────────────────────────────── */
+QTableWidget {
+    background-color: #1a1a40;
+    border: none;
+    gridline-color: #0f3460;
+    color: #e0e0e0;
+}
+
+QTableWidget::item:selected {
+    background-color: #533483;
+}
+
+QHeaderView::section {
+    background-color: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    padding: 4px;
+}
+
 /* ── Status Bar ─────────────────────────────────────── */
 QStatusBar {
     background-color: #0f3460;

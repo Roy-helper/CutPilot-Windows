@@ -15,10 +15,11 @@ class CutPilotConfig(BaseSettings):
 
     model_config = {"env_prefix": "CUTPILOT_", "env_file": ".env", "frozen": True}
 
-    # DeepSeek API
+    # AI provider
+    provider: str = "deepseek"
     api_key: str = ""
-    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    model: str = "deepseek-v3"
+    base_url: str = "https://api.deepseek.com/v1"
+    model: str = "deepseek-chat"
 
     # Processing
     max_versions: int = 3

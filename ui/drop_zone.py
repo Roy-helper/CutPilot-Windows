@@ -1,8 +1,10 @@
 """Drag-and-drop zone widget for importing video files."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QFileDialog
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QFileDialog, QMenu
 
 
 class _TransparentLabel(QLabel):
@@ -41,7 +43,9 @@ class DropZone(QFrame):
         text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(text_label)
 
-        hint_label = _TransparentLabel("支持 MP4 / MOV / AVI / MKV  |  点击选择文件")
+        hint_label = _TransparentLabel(
+            "支持 MP4 / MOV / AVI / MKV / FLV  |  点击选择文件或文件夹"
+        )
         hint_label.setStyleSheet("font-size: 11px; color: #7a7a9e;")
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint_label)
@@ -54,21 +58,51 @@ class DropZone(QFrame):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
+    _VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".flv")
+
     def dropEvent(self, event):
         urls = event.mimeData().urls()
-        file_paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+        file_paths: list[str] = []
+        for url in urls:
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.is_dir():
+                for ext in self._VIDEO_EXTENSIONS:
+                    file_paths.extend(str(f) for f in path.rglob(f"*{ext}"))
+            elif path.is_file():
+                file_paths.append(str(path))
         if file_paths:
             self.files_dropped.emit(file_paths)
             event.acceptProposedAction()
 
     def mousePressEvent(self, event):
-        """Click to open file browser as fallback."""
+        """Click to show menu: browse files or browse folder."""
         if event.button() == Qt.MouseButton.LeftButton:
-            files, _ = QFileDialog.getOpenFileNames(
-                self,
-                "选择视频文件",
-                "",
-                "视频文件 (*.mp4 *.mov *.avi *.mkv *.flv);;所有文件 (*)",
-            )
-            if files:
-                self.files_dropped.emit(files)
+            menu = QMenu(self)
+            menu.addAction("选择视频文件", self._browse_files)
+            menu.addAction("选择文件夹", self._browse_folder)
+            menu.exec(event.globalPosition().toPoint())
+
+    def _browse_files(self) -> None:
+        """Open file picker for individual video files."""
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "选择视频文件",
+            "",
+            "视频文件 (*.mp4 *.mov *.avi *.mkv *.flv);;所有文件 (*)",
+        )
+        if files:
+            self.files_dropped.emit(files)
+
+    def _browse_folder(self) -> None:
+        """Open folder picker and scan for video files recursively."""
+        folder = QFileDialog.getExistingDirectory(self, "选择文件夹")
+        if not folder:
+            return
+        file_paths: list[str] = []
+        folder_path = Path(folder)
+        for ext in self._VIDEO_EXTENSIONS:
+            file_paths.extend(str(f) for f in folder_path.rglob(f"*{ext}"))
+        if file_paths:
+            self.files_dropped.emit(file_paths)
