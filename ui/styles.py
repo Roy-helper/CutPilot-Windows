@@ -204,6 +204,43 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
 }
 
+/* ── Checkbox ──────────────────────────────────────── */
+QCheckBox {
+    color: #e0e0e0;
+    spacing: 6px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #533483;
+    border-radius: 3px;
+    background: #1a1a40;
+}
+
+QCheckBox::indicator:checked {
+    background: #e94560;
+    border-color: #e94560;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #e94560;
+}
+
+/* ── Settings Button ───────────────────────────────── */
+QPushButton#settingsButton {
+    background-color: transparent;
+    color: #7a7a9e;
+    border: 1px solid #0f3460;
+    border-radius: 18px;
+    font-size: 18px;
+}
+
+QPushButton#settingsButton:hover {
+    color: #e94560;
+    border-color: #e94560;
+}
+
 /* ── Status Bar ─────────────────────────────────────── */
 QStatusBar {
     background-color: #0f3460;

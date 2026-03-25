@@ -16,9 +16,11 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import CutPilotConfig
+from core.license import check_license, consume_trial, get_trial_remaining
 from core.models import ProcessResult
 from core.pipeline import generate_copy_text
 from core.user_settings import build_config_from_settings, load_user_settings
+from ui.activation_dialog import ActivationDialog
 from ui.styles import DARK_THEME
 from ui.drop_zone import DropZone
 from ui.result_panel import ResultPanel
@@ -40,9 +42,11 @@ class MainWindow(QMainWindow):
         self._output_dir: Path | None = None
         self._results: dict[str, ProcessResult] = {}
         self._worker: PipelineWorker | None = None
+        self._is_trial_mode: bool = False
 
         self._setup_ui()
         self._setup_statusbar()
+        self._check_license_on_startup()
 
     def _setup_ui(self):
         central = QWidget()
@@ -160,6 +164,47 @@ class MainWindow(QMainWindow):
         status.showMessage("CutPilot v0.1.0 — 拖入视频开始使用")
         self.setStatusBar(status)
 
+    # ── License ──
+
+    def _check_license_on_startup(self) -> None:
+        """Check license status and show activation dialog if needed."""
+        is_valid, message, expiry = check_license()
+
+        if is_valid and expiry is not None:
+            self.statusBar().showMessage(
+                f"CutPilot v0.1.0 | 授权有效，到期: {expiry.isoformat()}"
+            )
+            return
+
+        # No valid license — show activation dialog
+        dialog = ActivationDialog(self)
+        result = dialog.exec()
+
+        if result == ActivationDialog.Accepted:
+            # Successfully activated
+            _, _, new_expiry = check_license()
+            expiry_str = new_expiry.isoformat() if new_expiry else "未知"
+            self.statusBar().showMessage(
+                f"CutPilot v0.1.0 | 激活成功，到期: {expiry_str}"
+            )
+        elif ActivationDialog.result_is_trial(result):
+            # Trial mode
+            remaining = get_trial_remaining()
+            self.statusBar().showMessage(
+                f"CutPilot v0.1.0 | 试用模式 (剩余 {remaining} 次)"
+            )
+            self._is_trial_mode = True
+        else:
+            # User closed dialog without activating or trial
+            self.statusBar().showMessage("CutPilot v0.1.0 | 未激活")
+            self.generate_btn.setEnabled(False)
+            self._lock_for_no_license()
+
+    def _lock_for_no_license(self) -> None:
+        """Disable generation when no license and no trial."""
+        self.generate_btn.setEnabled(False)
+        self.drop_zone.setEnabled(False)
+
     # ── File management ──
 
     def _on_files_dropped(self, file_paths: list[str]):
@@ -198,6 +243,24 @@ class MainWindow(QMainWindow):
         """Start processing all imported videos."""
 
         if not self._video_files:
+            return
+
+        # License check before generation
+        is_valid, _, _ = check_license()
+        if not is_valid and self._is_trial_mode:
+            success, remaining = consume_trial()
+            if not success:
+                QMessageBox.warning(
+                    self, "试用结束",
+                    "试用次数已用完，请输入激活码继续使用。",
+                )
+                self._check_license_on_startup()
+                return
+            self.statusBar().showMessage(
+                f"试用模式 | 剩余 {remaining} 次"
+            )
+        elif not is_valid:
+            self._check_license_on_startup()
             return
 
         config = build_config_from_settings()

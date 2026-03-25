@@ -20,14 +20,11 @@ from pathlib import Path
 from core.ai_client import call_ai
 from core.config import CutPilotConfig
 from core.models import ScriptVersion, Sentence
+from core.paths import get_config_dir, get_prompts_dir
 
 logger = logging.getLogger(__name__)
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SENSITIVE_WORDS_PATH = _PROJECT_ROOT / "config" / "sensitive_words.json"
-_SYSTEM_PROMPT_PATH = _PROJECT_ROOT / "config" / "prompts" / "inspector.md"
 
 # Thresholds
 MIN_SCORE_APPROVED = 50.0
@@ -38,13 +35,15 @@ OVERLAP_REJECT_THRESHOLD = 0.50
 
 
 def load_sensitive_words(
-    path: Path = _SENSITIVE_WORDS_PATH,
+    path: Path | None = None,
 ) -> dict[str, list[str]]:
     """Load sensitive word lists from JSON config file.
 
     Returns dict with keys: prohibited, sensitive, platform_risk.
     Falls back to empty lists if file is missing.
     """
+    if path is None:
+        path = get_config_dir() / "sensitive_words.json"
     if path.exists():
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -160,8 +159,10 @@ def extract_core_hook_text(
 # -- AI review prompt -------------------------------------------------------
 
 
-def _load_system_prompt(path: Path = _SYSTEM_PROMPT_PATH) -> str:
+def _load_system_prompt(path: Path | None = None) -> str:
     """Load inspector system prompt from markdown file."""
+    if path is None:
+        path = get_prompts_dir() / "inspector.md"
     if path.exists():
         return path.read_text(encoding="utf-8").strip()
     logger.warning("Inspector prompt not found: %s", path)

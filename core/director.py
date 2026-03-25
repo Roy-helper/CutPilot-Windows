@@ -19,17 +19,17 @@ from core.ai_client import create_openai_client
 from core.category_detector import detect_category
 from core.config import CutPilotConfig
 from core.models import ScriptVersion, Sentence
+from core.paths import get_prompts_dir
 
 logger = logging.getLogger(__name__)
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-_PROMPT_DIR = Path(__file__).resolve().parent.parent / "config" / "prompts"
 
 
 def _load_prompt_template() -> str:
     """Load the sentence selector prompt template from config/prompts/."""
-    prompt_path = _PROMPT_DIR / "sentence_selector.md"
+    prompt_path = get_prompts_dir() / "sentence_selector.md"
     if not prompt_path.exists():
         raise FileNotFoundError(
             f"Prompt template not found at {prompt_path}. "
@@ -42,7 +42,7 @@ def _load_category_preferences(category: str) -> str:
     """Load category-specific content preferences, or empty string."""
     if category == "general":
         return ""
-    category_path = _PROMPT_DIR / "categories" / f"{category}.md"
+    category_path = get_prompts_dir() / "categories" / f"{category}.md"
     if not category_path.exists():
         logger.warning("No category prompt for '%s', using general", category)
         return ""

@@ -167,19 +167,16 @@ class TestLoadCategoryPreferences:
         result = _load_category_preferences("nonexistent_category_xyz")
         assert result == ""
 
-    @patch("core.director._PROMPT_DIR")
+    @patch("core.director.get_prompts_dir")
     def test_known_category_returns_content(self, mock_dir, tmp_path):
         cat_dir = tmp_path / "categories"
         cat_dir.mkdir()
         cat_file = cat_dir / "beauty.md"
         cat_file.write_text("beauty preferences", encoding="utf-8")
-        mock_dir.__truediv__ = lambda self, x: tmp_path / x
-        # Direct call with patched path
-        from core.director import _load_category_preferences as lcp
+        mock_dir.return_value = tmp_path
 
-        # We need to patch the Path resolution, simpler to test file-exists path
-        result = _load_category_preferences("general")
-        assert result == ""
+        result = _load_category_preferences("beauty")
+        assert result == "beauty preferences"
 
 
 # -- generate_versions (mocked LLM) -----------------------------------------
