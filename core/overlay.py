@@ -19,12 +19,15 @@ def create_hook_image(
     text: str,
     video_width: int,
     video_height: int,
-) -> Path:
+) -> Path | None:
     """Generate a hook-text PNG overlay sized for the given video.
 
-    Returns the path to a temporary PNG file (caller must clean up).
+    Returns the path to a temporary PNG file, or None if CJK font unavailable.
     """
     font_path = find_cjk_font()
+    if font_path is None:
+        logger.warning("跳过 Hook 文字叠加: 未找到中文字体，请安装 PingFang/微软雅黑等字体")
+        return None
     font_size = max(36, int(video_width * 0.08))
 
     img = render_text_card(
@@ -59,6 +62,8 @@ async def burn_hook_overlay(
         width, height = probe["width"], probe["height"]
 
         overlay_png = create_hook_image(hook_text, width, height)
+        if overlay_png is None:
+            return video_path
         try:
             output_path = video_path.with_name(
                 f"{video_path.stem}_hooked{video_path.suffix}"
@@ -70,7 +75,7 @@ async def burn_hook_overlay(
             overlay_png.unlink(missing_ok=True)
     except Exception:
         logger.warning(
-            "Hook overlay failed for %s, keeping original",
+            "Hook 文字叠加失败: %s — 将使用无 Hook 版本",
             video_path.name,
             exc_info=True,
         )

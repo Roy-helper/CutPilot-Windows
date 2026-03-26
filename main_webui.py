@@ -1,12 +1,14 @@
 """CutPilot — Web UI launcher via pywebview.
 
-Opens a native window rendering the Vue 3 + Ant Design frontend.
+Opens a native window rendering the Vue 3 + Tailwind frontend.
 Python backend functions are exposed to JavaScript via the pywebview API bridge.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
+import threading
 from pathlib import Path
 
 import webview
@@ -14,16 +16,60 @@ import webview
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Path to the built Vue app
 _DIST_DIR = Path(__file__).parent / "webui" / "dist"
+
+# Background event loop for async pipeline calls
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_loop() -> asyncio.AbstractEventLoop:
+    global _loop
+    if _loop is None:
+        _loop = asyncio.new_event_loop()
+        t = threading.Thread(target=_loop.run_forever, daemon=True)
+        t.start()
+    return _loop
+
+
+def _run_async(coro):
+    """Run an async coroutine from the sync pywebview bridge."""
+    loop = _get_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
 
 
 class PythonBridge:
-    """API bridge exposed to JavaScript as `window.pywebview.api`.
+    """API bridge exposed to JavaScript as ``window.pywebview.api``.
 
-    Every public method here is callable from the Vue frontend.
-    This is the skeleton — methods will be connected to core/ modules.
+    Every public method is callable from the Vue frontend.
     """
+
+    def __init__(self) -> None:
+        self._window: webview.Window | None = None
+        self._processing = False
+
+    def set_window(self, window: webview.Window) -> None:
+        self._window = window
+
+    # ── Health ──────────────────────────────────────────────
+
+    def ping(self) -> str:
+        return "pong"
+
+    # ── Hardware Detection ──────────────────────────────────
+
+    def get_encoder_info(self) -> dict:
+        """Return detected hardware encoder info."""
+        from core.hwaccel import get_encoder_info
+        info = get_encoder_info()
+        return info.model_dump()
+
+    def get_max_parallel(self) -> int:
+        """Return recommended parallel encode count."""
+        from core.hwaccel import get_max_parallel
+        return get_max_parallel()
+
+    # ── License ─────────────────────────────────────────────
 
     def get_machine_id(self) -> str:
         from core.license import get_machine_id
@@ -32,6 +78,14 @@ class PythonBridge:
     def get_license_info(self) -> dict:
         from core.license import get_license_info
         return get_license_info()
+
+    def activate_license(self, code: str) -> dict:
+        """Validate and activate a license code."""
+        from core.license import activate
+        success, message = activate(code)
+        return {"success": success, "message": message}
+
+    # ── Settings ────────────────────────────────────────────
 
     def load_settings(self) -> dict:
         from core.user_settings import load_user_settings
@@ -45,13 +99,343 @@ class PythonBridge:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    # ── Providers ───────────────────────────────────────────
+
     def get_providers(self) -> list[dict]:
         from core.providers import PROVIDERS
         return [p.model_dump() for p in PROVIDERS]
 
-    def ping(self) -> str:
-        """Health check — verify bridge is working."""
-        return "pong"
+    # ── File Operations ─────────────────────────────────────
+
+    def select_files(self) -> list[str]:
+        """Open native file picker and return selected video paths."""
+        if not self._window:
+            return []
+        result = self._window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=True,
+            file_types=(
+                "视频文件 (*.mp4;*.mov;*.avi;*.mkv;*.flv;*.wmv)",
+                "所有文件 (*.*)",
+            ),
+        )
+        return list(result) if result else []
+
+    def select_directory(self) -> str:
+        """Open native directory picker and return selected path."""
+        if not self._window:
+            return ""
+        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        return result[0] if result else ""
+
+    def open_folder(self, path: str) -> dict:
+        """Open a folder in Finder/Explorer."""
+        import subprocess
+        try:
+            p = Path(path)
+            target = p if p.is_dir() else p.parent
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", str(target)])
+            elif sys.platform == "win32":
+                subprocess.Popen(["explorer", str(target)])
+            else:
+                subprocess.Popen(["xdg-open", str(target)])
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ── History ─────────────────────────────────────────────
+
+    def get_history(self) -> list[dict]:
+        from core.history import load_history
+        return load_history()
+
+    def clear_history(self) -> dict:
+        from core.history import clear_history
+        try:
+            clear_history()
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def delete_history_entry(self, timestamp: str) -> dict:
+        from core.history import delete_history_entry
+        try:
+            delete_history_entry(timestamp)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ── AI Connection Test ──────────────────────────────────
+
+    def test_connection(self, provider: str, api_key: str,
+                        base_url: str = "", model: str = "") -> dict:
+        """Test AI API connection with given credentials."""
+        from core.providers import get_provider
+        from openai import OpenAI
+
+        preset = get_provider(provider)
+        if not preset and not base_url:
+            return {"success": False, "error": "未知供应商"}
+
+        url = base_url or (preset.base_url if preset else "")
+        mdl = model or (preset.model if preset else "")
+
+        try:
+            client = OpenAI(api_key=api_key, base_url=url)
+            resp = client.chat.completions.create(
+                model=mdl,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=5,
+            )
+            return {"success": True, "model": mdl, "reply": resp.choices[0].message.content}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ── Pipeline ────────────────────────────────────────────
+
+    def process_video(self, video_path: str, settings_override: dict | None = None) -> dict:
+        """Run the full pipeline on a video file.
+
+        Sends progress updates to the frontend via JS evaluation.
+        Returns ProcessResult as dict.
+        """
+        if self._processing:
+            return {"success": False, "error": "已有任务在处理中"}
+
+        from core.user_settings import build_config_from_settings
+        config = build_config_from_settings()
+        if not config.api_key:
+            return {"success": False, "error": "请先在设置页配置 API Key"}
+
+        self._processing = True
+        try:
+            from core.config import CutPilotConfig
+            from core.cache_manager import CacheManager
+            from core.pipeline import process_video
+            from core.history import add_history_entry, HistoryEntry
+            from datetime import datetime
+            import time
+
+            if settings_override:
+                config = CutPilotConfig(**{**config.model_dump(), **settings_override})
+
+            cache = CacheManager()
+
+            def on_progress(label: str, percent: int) -> None:
+                if self._window:
+                    js = f'window.dispatchEvent(new CustomEvent("pipeline-progress", {{detail: {{label: "{label}", percent: {percent}}}}}))'
+                    self._window.evaluate_js(js)
+
+            hotwords = ""
+            user_settings = self.load_settings()
+            if "hotwords" in user_settings:
+                hotwords = user_settings["hotwords"]
+
+            start = time.time()
+            result = _run_async(process_video(
+                video_path=Path(video_path),
+                config=config,
+                on_progress=on_progress,
+                cache=cache,
+                hotwords=hotwords,
+            ))
+            elapsed = time.time() - start
+
+            result_dict = result.model_dump()
+
+            # Record history
+            entry = HistoryEntry(
+                video_name=Path(video_path).name,
+                video_path=video_path,
+                timestamp=datetime.now().isoformat(),
+                success=result.success,
+                error=result.error,
+                versions_count=len(result.versions),
+                output_files=[str(f) for f in result.output_files] if result.output_files else [],
+                approach_tags=[v.approach_tag for v in result.versions] if result.versions else [],
+                duration_sec=round(elapsed, 1),
+            )
+            add_history_entry(entry)
+
+            return result_dict
+        except Exception as e:
+            logger.exception("Pipeline error")
+            return {"success": False, "error": str(e), "versions": [], "output_files": []}
+        finally:
+            self._processing = False
+
+    def is_processing(self) -> bool:
+        return self._processing
+
+    def process_batch(self, video_paths: list[str]) -> list[dict]:
+        """Process multiple videos in parallel with auto-detected concurrency.
+
+        Sends per-video progress events to the frontend.
+        Returns list of ProcessResult dicts.
+        """
+        if self._processing:
+            return [{"success": False, "error": "已有任务在处理中"}]
+
+        from core.user_settings import build_config_from_settings
+        config = build_config_from_settings()
+        if not config.api_key:
+            return [{"success": False, "error": "请先在设置页配置 API Key", "versions": [], "output_files": []}]
+
+        self._processing = True
+        try:
+            from core.cache_manager import CacheManager
+            from core.pipeline import process_batch
+            from core.history import add_history_entry, HistoryEntry
+            from core.hwaccel import get_max_parallel
+            from datetime import datetime
+            import time
+
+            cache = CacheManager()
+            max_par = get_max_parallel()
+
+            hotwords = ""
+            user_settings = self.load_settings()
+            if "hotwords" in user_settings:
+                hotwords = user_settings["hotwords"]
+
+            def on_progress(video_name: str, index: int, percent: int) -> None:
+                if self._window:
+                    safe_name = video_name.replace('"', '\\"')
+                    js = (
+                        f'window.dispatchEvent(new CustomEvent("pipeline-progress", '
+                        f'{{detail: {{label: "{safe_name}", percent: {percent}, index: {index}, total: {len(video_paths)}}}}}))'
+                    )
+                    self._window.evaluate_js(js)
+
+            start = time.time()
+            paths = [Path(p) for p in video_paths]
+            results = _run_async(process_batch(
+                video_paths=paths,
+                config=config,
+                on_progress=on_progress,
+                cache=cache,
+                hotwords=hotwords,
+                max_parallel=max_par,
+            ))
+            elapsed = time.time() - start
+
+            result_dicts = []
+            for i, result in enumerate(results):
+                # Record history per video
+                entry = HistoryEntry(
+                    video_name=paths[i].name,
+                    video_path=video_paths[i],
+                    timestamp=datetime.now().isoformat(),
+                    success=result.success,
+                    error=result.error,
+                    versions_count=len(result.versions),
+                    output_files=[str(f) for f in result.output_files] if result.output_files else [],
+                    approach_tags=[v.approach_tag for v in result.versions] if result.versions else [],
+                    duration_sec=round(elapsed / len(paths), 1),
+                )
+                add_history_entry(entry)
+                result_dicts.append(result.model_dump())
+
+            return result_dicts
+        except Exception as e:
+            logger.exception("Batch pipeline error")
+            return [{"success": False, "error": str(e), "versions": [], "output_files": []}]
+        finally:
+            self._processing = False
+
+    # ── Export ───────────────────────────────────────────────
+
+    def export_versions(self, video_path: str, version_ids: list[int],
+                        options: dict | None = None) -> dict:
+        """Export specific versions of a processed video."""
+        try:
+            from core.editor import cut_versions
+            from core.models import ExportOptions, ScriptVersion
+            from core.cache_manager import CacheManager
+            from core.user_settings import build_config_from_settings
+
+            config = build_config_from_settings()
+            cache = CacheManager()
+
+            # Load cached inspector results (approved versions)
+            # Cache stores a plain list of version dicts
+            inspector_data = cache.load(Path(video_path), "inspector")
+            if not inspector_data:
+                return {"success": False, "error": "未找到缓存的版本数据，请先处理视频"}
+
+            version_list = inspector_data if isinstance(inspector_data, list) else inspector_data.get("versions", [])
+            all_versions = [ScriptVersion(**v) for v in version_list]
+            selected = [v for v in all_versions if v.version_id in version_ids]
+
+            if not selected:
+                return {"success": False, "error": "未找到选中的版本"}
+
+            # Cache stores a plain list of sentence dicts
+            asr_data = cache.load(Path(video_path), "asr")
+            if not asr_data:
+                return {"success": False, "error": "未找到 ASR 缓存"}
+
+            from core.models import Sentence
+            sentence_list = asr_data if isinstance(asr_data, list) else asr_data.get("sentences", [])
+            sentences = [Sentence(**s) for s in sentence_list]
+
+            export_opts = None
+            if options:
+                export_opts = [ExportOptions(version_id=vid, **options) for vid in version_ids]
+
+            output = _run_async(cut_versions(
+                video_path=Path(video_path),
+                versions=selected,
+                sentences=sentences,
+                config=config,
+                export_options=export_opts,
+            ))
+            return {"success": True, "files": output}
+        except Exception as e:
+            logger.exception("Export error")
+            return {"success": False, "error": str(e)}
+
+    # ── Preview ─────────────────────────────────────────────
+
+    def preview_video(self, file_path: str) -> dict:
+        """Open a video file in the system default player."""
+        import subprocess
+        p = Path(file_path)
+        if not p.exists():
+            return {"success": False, "error": f"文件不存在: {file_path}"}
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", str(p)])
+            elif sys.platform == "win32":
+                subprocess.Popen(["start", "", str(p)], shell=True)
+            else:
+                subprocess.Popen(["xdg-open", str(p)])
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_output_files(self, video_path: str) -> list[dict]:
+        """Get list of output files for a processed video from cache/disk."""
+        vpath = Path(video_path)
+        config_output = ""
+        try:
+            from core.user_settings import build_config_from_settings
+            c = build_config_from_settings()
+            config_output = c.output_dir
+        except Exception:
+            pass
+        output_dir = Path(config_output) if config_output else vpath.parent / "output"
+        stem = vpath.stem
+        results = []
+        if output_dir.exists():
+            for f in sorted(output_dir.glob(f"{stem}_v*")):
+                results.append({
+                    "path": str(f),
+                    "name": f.name,
+                    "size_mb": round(f.stat().st_size / 1024 / 1024, 1),
+                })
+        return results
 
 
 def main():
@@ -67,8 +451,32 @@ def main():
         width=1280,
         height=820,
         min_size=(1000, 600),
-        background_color="#141421",
+        background_color="#f8f9fa",
     )
+
+    def on_loaded():
+        api.set_window(window)
+        # Check license and warn if expired
+        try:
+            from core.license import check_license, get_trial_remaining
+            is_valid, message, expiry = check_license()
+            trial = get_trial_remaining()
+            if not is_valid and trial <= 0:
+                js = 'window.dispatchEvent(new CustomEvent("license-warning", {detail: {message: "授权已过期且试用次数已用完，请联系管理员获取激活码", level: "error"}}))'
+                window.evaluate_js(js)
+            elif not is_valid:
+                js = f'window.dispatchEvent(new CustomEvent("license-warning", {{detail: {{message: "试用模式: 剩余 {trial} 次免费使用", level: "info"}}}}))'
+                window.evaluate_js(js)
+            elif expiry:
+                from datetime import date, timedelta
+                if expiry - date.today() < timedelta(days=7):
+                    days_left = (expiry - date.today()).days
+                    js = f'window.dispatchEvent(new CustomEvent("license-warning", {{detail: {{message: "授权将在 {days_left} 天后到期，请及时续费", level: "info"}}}}))'
+                    window.evaluate_js(js)
+        except Exception:
+            pass
+
+    window.events.loaded += on_loaded
     webview.start(debug=("--debug" in sys.argv))
 
 

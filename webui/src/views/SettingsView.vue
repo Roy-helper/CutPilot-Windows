@@ -1,208 +1,406 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { message } from 'ant-design-vue'
+import { ref, onMounted } from 'vue'
+import TopBar from '@/components/TopBar.vue'
 import {
-  ApiOutlined,
-  ToolOutlined,
-  AudioOutlined,
-  ExportOutlined,
-  SafetyCertificateOutlined,
-  CopyOutlined,
-} from '@ant-design/icons-vue'
+  getMachineId, getLicenseInfo, activateLicense, loadSettings, saveSettings as bridgeSave,
+  getProviders as bridgeProviders, testConnection as bridgeTest,
+  selectDirectory, getEncoderInfo, getMaxParallel, type ProviderPreset,
+} from '@/bridge'
 
-// Provider presets
-const providers = [
-  { id: 'deepseek', name: 'DeepSeek', hint: 'sk-... (platform.deepseek.com)' },
-  { id: 'qwen', name: '通义千问 (阿里云百炼)', hint: 'sk-... (bailian.console.aliyun.com)' },
-  { id: 'kimi', name: 'Kimi (月之暗面)', hint: 'sk-... (platform.moonshot.cn)' },
-  { id: 'minimax', name: 'MiniMax', hint: 'eyJ... (platform.minimaxi.com)' },
-  { id: 'zhipu', name: '智谱 ChatGLM', hint: '从 open.bigmodel.cn 获取' },
-  { id: 'custom', name: '自定义 (OpenAI 兼容)', hint: '输入 API Key' },
-]
-
-// Settings state
 const provider = ref('deepseek')
 const apiKey = ref('')
-const customUrl = ref('')
-const customModel = ref('')
+const showApiKey = ref(false)
+
 const maxVersions = ref(3)
-const minSentences = ref(15)
-const quality = ref('standard')
+const minSentences = ref(5)
+const quality = ref('1080P')
+const hookText = ref('')
 const generateFast = ref(true)
-const enableHook = ref(false)
+const enableHook = ref(true)
+const enableDiarization = ref(true)
+const hookDuration = ref(3.0)
+
 const hotwords = ref('')
 const outputDir = ref('')
 
-// License
-const machineId = ref('2bac81ca39a1b6d2')
-const licenseStatus = ref('有效')
-const licenseExpiry = ref('2026-12-31')
+// Quality mapping: UI label <-> backend value
+const qualityToBackend: Record<string, string> = {
+  '720P': 'draft',
+  '1080P': 'standard',
+  '4K': 'high',
+}
+const qualityFromBackend: Record<string, string> = {
+  draft: '720P',
+  standard: '1080P',
+  high: '4K',
+}
 
-const currentHint = ref(providers[0]!.hint)
-watch(provider, (val) => {
-  const p = providers.find(x => x.id === val)
-  currentHint.value = p?.hint ?? ''
+const machineId = ref('...')
+const licenseStatus = ref('...')
+const licenseExpiry = ref('...')
+
+const activationCode = ref('')
+const activating = ref(false)
+const activateResult = ref('')
+
+const providers = ref<{ id: string; name: string }[]>([])
+const testResult = ref<string | null>(null)
+const saving = ref(false)
+const detectedEncoder = ref('自动检测中...')
+const detectedParallel = ref(0)
+
+onMounted(async () => {
+  // Load providers
+  const p = await bridgeProviders()
+  providers.value = p.map((pr: ProviderPreset) => ({ id: pr.id, name: pr.name }))
+
+  // Load license
+  machineId.value = await getMachineId()
+  await refreshLicense()
+
+  // Load saved settings
+  const s = await loadSettings()
+  if (s.provider) provider.value = s.provider as string
+  if (s.api_key) apiKey.value = s.api_key as string
+  if (s.max_versions) maxVersions.value = s.max_versions as number
+  if (s.min_sentences) minSentences.value = s.min_sentences as number
+  if (s.video_quality) quality.value = qualityFromBackend[s.video_quality as string] ?? '1080P'
+  if (s.hotwords) hotwords.value = s.hotwords as string
+  if (s.output_dir) outputDir.value = s.output_dir as string
+  if (s.hook_text) hookText.value = s.hook_text as string
+  if (s.generate_fast != null) generateFast.value = s.generate_fast as boolean
+  if (s.enable_hook_overlay != null) enableHook.value = s.enable_hook_overlay as boolean
+  if (s.enable_speaker_diarization != null) enableDiarization.value = s.enable_speaker_diarization as boolean
+  if (s.hook_duration != null) hookDuration.value = s.hook_duration as number
+
+  // Detect encoder
+  const enc = await getEncoderInfo()
+  detectedEncoder.value = enc.is_hardware ? `${enc.name} (${enc.codec})` : `${enc.name}`
+  detectedParallel.value = await getMaxParallel()
 })
-
-function testConnection() {
-  message.loading('测试连接中...', 1.5)
-  setTimeout(() => message.success('连接成功'), 1500)
-}
-
-function saveSettings() {
-  message.success('设置已保存')
-}
 
 function copyMachineId() {
   navigator.clipboard.writeText(machineId.value)
-  message.success('已复制')
+}
+
+async function refreshLicense() {
+  const license = await getLicenseInfo() as Record<string, any>
+  licenseStatus.value = license.is_valid ? '已激活' : (license.status_message ?? '未激活')
+  licenseExpiry.value = license.expiry ?? '-'
+}
+
+async function handleActivate() {
+  if (!activationCode.value.trim()) return
+  activating.value = true
+  activateResult.value = ''
+  const res = await activateLicense(activationCode.value.trim())
+  activateResult.value = res.message ?? (res.success ? '激活成功！' : '激活失败')
+  if (res.success) {
+    await refreshLicense()
+    activationCode.value = ''
+  }
+  activating.value = false
+}
+
+async function testConnection() {
+  testResult.value = '测试中...'
+  const res = await bridgeTest(provider.value, apiKey.value)
+  testResult.value = res.success ? `连接成功 (${res.model})` : `失败: ${res.error}`
+  setTimeout(() => { testResult.value = null }, 5000)
+}
+
+async function saveAllSettings() {
+  saving.value = true
+  await bridgeSave({
+    provider: provider.value,
+    api_key: apiKey.value,
+    max_versions: maxVersions.value,
+    min_sentences: minSentences.value,
+    video_quality: qualityToBackend[quality.value] ?? 'standard',
+    hotwords: hotwords.value,
+    output_dir: outputDir.value,
+    hook_text: hookText.value,
+    generate_fast: generateFast.value,
+    enable_hook_overlay: enableHook.value,
+    enable_speaker_diarization: enableDiarization.value,
+    hook_duration: hookDuration.value,
+  })
+  saving.value = false
+}
+
+async function browseOutputDir() {
+  const dir = await selectDirectory()
+  if (dir) outputDir.value = dir
 }
 </script>
 
 <template>
-  <div class="settings-page">
-    <div class="page-header">
-      <h2>设置</h2>
-      <a-button type="primary" @click="saveSettings">保存设置</a-button>
+  <TopBar search-placeholder="搜索设置项..." />
+
+  <div class="max-w-[1280px] mx-auto p-12">
+    <div class="mb-10">
+      <h2 class="text-3xl font-bold tracking-tight text-on-surface">系统设置</h2>
+      <p class="text-on-surface-variant mt-2 text-sm">管理您的 AI 处理引擎、模型权限及导出首选项</p>
     </div>
 
-    <div class="settings-grid">
-      <!-- License -->
-      <div class="settings-section">
-        <div class="section-title"><SafetyCertificateOutlined /> 授权信息</div>
-        <div class="setting-row">
-          <label>机器码</label>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <a-input :value="machineId" readonly style="font-family: monospace; width: 200px;" />
-            <a-button size="small" @click="copyMachineId"><CopyOutlined /></a-button>
+    <div class="grid grid-cols-12 gap-8">
+      <!-- Left Column -->
+      <section class="col-span-12 lg:col-span-4 space-y-6">
+        <!-- License -->
+        <div class="bg-surface-container-low p-8 rounded-xl">
+          <div class="flex items-center gap-3 mb-6">
+            <span class="material-symbols-outlined text-primary">verified</span>
+            <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">授权详情</h3>
+          </div>
+          <div class="space-y-6">
+            <div>
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider mb-2">机器码 (Hardware ID)</label>
+              <div class="bg-surface-container-highest font-mono text-xs p-3 rounded-md flex justify-between items-center group">
+                <span class="truncate">{{ machineId }}</span>
+                <button class="opacity-0 group-hover:opacity-100 transition-opacity" @click="copyMachineId">
+                  <span class="material-symbols-outlined text-sm">content_copy</span>
+                </button>
+              </div>
+            </div>
+            <div class="flex justify-between items-center py-2 border-b border-outline-variant/10">
+              <span class="text-sm font-medium">授权状态</span>
+              <span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase" :class="licenseStatus === '未激活' || licenseStatus.includes('过期') ? 'bg-error-container text-on-error-container' : 'bg-green-100 text-green-700'">{{ licenseStatus }}</span>
+            </div>
+            <div class="flex justify-between items-center py-2 border-b border-outline-variant/10">
+              <span class="text-sm font-medium">到期日期</span>
+              <span class="text-sm text-on-surface-variant">{{ licenseExpiry }}</span>
+            </div>
+            <!-- Activation code input -->
+            <div class="pt-2">
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider mb-2">输入激活码</label>
+              <div class="flex gap-2">
+                <input
+                  v-model="activationCode"
+                  class="flex-1 bg-surface-container-highest border-none rounded-md py-2.5 px-4 text-sm font-mono focus:ring-2 focus:ring-primary/20"
+                  placeholder="CP-XXXXXXXX-XXXXXXXX-XXXXXXXXXXXX"
+                  type="text"
+                />
+                <button
+                  class="px-4 py-2 bg-primary text-white text-sm font-semibold rounded-md hover:bg-primary-container transition-all disabled:opacity-50"
+                  :disabled="!activationCode.trim() || activating"
+                  @click="handleActivate"
+                >{{ activating ? '验证中...' : '激活' }}</button>
+              </div>
+              <p v-if="activateResult" class="text-xs mt-2" :class="activateResult.startsWith('激活成功') ? 'text-green-600' : 'text-error'">{{ activateResult }}</p>
+            </div>
           </div>
         </div>
-        <div class="setting-row">
-          <label>授权状态</label>
-          <a-tag color="green">{{ licenseStatus }}</a-tag>
-          <span class="hint">到期: {{ licenseExpiry }}</span>
-        </div>
-      </div>
 
-      <!-- API -->
-      <div class="settings-section">
-        <div class="section-title"><ApiOutlined /> AI 模型</div>
-        <div class="setting-row">
-          <label>模型供应商</label>
-          <a-select v-model:value="provider" style="width: 280px;">
-            <a-select-option v-for="p in providers" :key="p.id" :value="p.id">
-              {{ p.name }}
-            </a-select-option>
-          </a-select>
-        </div>
-        <div class="setting-row">
-          <label>API Key</label>
-          <a-input-password v-model:value="apiKey" :placeholder="currentHint" style="width: 280px;" />
-          <a-button @click="testConnection">测试连接</a-button>
-        </div>
-        <template v-if="provider === 'custom'">
-          <div class="setting-row">
-            <label>API 地址</label>
-            <a-input v-model:value="customUrl" placeholder="https://..." style="width: 280px;" />
+        <!-- ASR -->
+        <div class="bg-surface-container-low p-8 rounded-xl">
+          <div class="flex items-center gap-3 mb-6">
+            <span class="material-symbols-outlined text-primary">mic</span>
+            <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">语音识别</h3>
           </div>
-          <div class="setting-row">
-            <label>模型名称</label>
-            <a-input v-model:value="customModel" placeholder="model-name" style="width: 280px;" />
+          <div class="space-y-4">
+            <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">专有热词输入 (Hotwords)</label>
+            <textarea
+              v-model="hotwords"
+              class="w-full bg-surface-container-highest border-none rounded-md p-4 text-sm focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all resize-none"
+              placeholder="输入行业术语、人名或品牌名，以逗号分隔..."
+              rows="4"
+            ></textarea>
+            <p class="text-[10px] text-on-surface-variant italic">提示：输入精确热词可显著提升专业术语识别率</p>
           </div>
-        </template>
-      </div>
+        </div>
+      </section>
 
-      <!-- Processing -->
-      <div class="settings-section">
-        <div class="section-title"><ToolOutlined /> 处理设置</div>
-        <div class="setting-row">
-          <label>版本数量</label>
-          <a-input-number v-model:value="maxVersions" :min="1" :max="5" />
+      <!-- Right Column -->
+      <div class="col-span-12 lg:col-span-8 space-y-8">
+        <!-- AI Model -->
+        <div class="bg-surface-container-low p-8 rounded-xl">
+          <div class="flex items-center justify-between mb-8">
+            <div class="flex items-center gap-3">
+              <span class="material-symbols-outlined text-primary">hub</span>
+              <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">AI 模型配置</h3>
+            </div>
+            <div class="flex items-center gap-3">
+              <span v-if="testResult" class="text-xs font-medium" :class="testResult.startsWith('连接') ? 'text-green-600' : testResult === '测试中...' ? 'text-primary' : 'text-error'">{{ testResult }}</span>
+              <button class="text-xs font-bold text-primary flex items-center gap-1 hover:underline" @click="testConnection">
+                <span class="material-symbols-outlined text-sm">bolt</span> 测试连接
+              </button>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">供应商 (Provider)</label>
+              <select
+                v-model="provider"
+                class="w-full bg-surface-container-highest border-none rounded-md py-3 px-4 text-sm focus:ring-2 focus:ring-primary/20"
+              >
+                <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name }}</option>
+              </select>
+            </div>
+            <div class="space-y-2">
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">API Key</label>
+              <div class="relative">
+                <input
+                  v-model="apiKey"
+                  class="w-full bg-surface-container-highest border-none rounded-md py-3 px-4 text-sm focus:ring-2 focus:ring-primary/20"
+                  :type="showApiKey ? 'text' : 'password'"
+                  placeholder="sk-..."
+                />
+                <button class="absolute right-3 top-1/2 -translate-y-1/2" @click="showApiKey = !showApiKey">
+                  <span class="material-symbols-outlined text-on-surface-variant text-sm">
+                    {{ showApiKey ? 'visibility_off' : 'visibility' }}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="setting-row">
-          <label>最少句数</label>
-          <a-input-number v-model:value="minSentences" :min="5" :max="50" />
-          <span class="hint">少于此句数的视频会跳过</span>
-        </div>
-        <div class="setting-row">
-          <label>视频质量</label>
-          <a-select v-model:value="quality" style="width: 200px;">
-            <a-select-option value="draft">快速预览 (draft)</a-select-option>
-            <a-select-option value="standard">标准 (standard)</a-select-option>
-            <a-select-option value="high">高质量 (high)</a-select-option>
-          </a-select>
-        </div>
-        <div class="setting-row">
-          <label>选项</label>
-          <a-checkbox v-model:checked="generateFast">生成 1.25x 加速版</a-checkbox>
-          <a-checkbox v-model:checked="enableHook">Hook 文字叠加</a-checkbox>
-        </div>
-      </div>
 
-      <!-- ASR -->
-      <div class="settings-section">
-        <div class="section-title"><AudioOutlined /> 语音识别</div>
-        <div class="setting-row">
-          <label>热词</label>
-          <a-input v-model:value="hotwords" placeholder="产品名 品牌名 (空格分隔)" style="width: 320px;" />
+        <!-- Processing -->
+        <div class="bg-surface-container-low p-8 rounded-xl">
+          <div class="flex items-center gap-3 mb-8">
+            <span class="material-symbols-outlined text-primary">settings_input_component</span>
+            <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">处理参数</h3>
+          </div>
+          <div class="grid grid-cols-2 gap-x-12 gap-y-8">
+            <!-- 版本迭代数 slider -->
+            <div class="space-y-4">
+              <div class="flex justify-between items-center">
+                <label class="text-sm font-medium">版本迭代数</label>
+                <span class="text-primary font-bold">{{ maxVersions }}</span>
+              </div>
+              <input
+                v-model.number="maxVersions"
+                class="w-full h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary"
+                type="range" min="1" max="12"
+              />
+            </div>
+            <!-- 最少句数 stepper -->
+            <div class="space-y-4">
+              <div class="flex justify-between items-center">
+                <label class="text-sm font-medium">最少句数</label>
+                <span class="text-primary font-bold">{{ minSentences }}</span>
+              </div>
+              <div class="flex gap-2">
+                <button class="flex-1 py-2 rounded bg-surface-container-highest text-sm font-bold hover:bg-surface-container-high" @click="minSentences = Math.max(1, minSentences - 1)">-</button>
+                <input v-model.number="minSentences" class="w-16 bg-transparent border-none text-center font-bold text-sm" type="text" />
+                <button class="flex-1 py-2 rounded bg-surface-container-highest text-sm font-bold hover:bg-surface-container-high" @click="minSentences++">+</button>
+              </div>
+            </div>
+            <!-- 视频质量 segmented control -->
+            <div class="space-y-2">
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">视频质量</label>
+              <div class="flex gap-2 p-1 bg-surface-container-highest rounded-lg">
+                <button
+                  v-for="q in ['720P', '1080P', '4K']" :key="q"
+                  class="flex-1 py-2 text-xs font-bold rounded-md transition-all"
+                  :class="quality === q ? 'bg-white shadow-sm text-primary' : ''"
+                  @click="quality = q"
+                >{{ q }}</button>
+              </div>
+            </div>
+            <!-- 导出引擎 — read-only auto-detect display -->
+            <div class="space-y-2">
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">导出引擎</label>
+              <div class="flex items-center gap-2 bg-surface-container-highest rounded-md py-2 px-4 text-sm text-on-surface-variant">
+                <span class="material-symbols-outlined text-primary text-base">auto_awesome</span>
+                <span>{{ detectedEncoder }}</span>
+                <span v-if="detectedParallel > 0" class="text-[10px] text-outline ml-auto">并行 {{ detectedParallel }} 路</span>
+              </div>
+            </div>
+            <!-- Toggle switches row -->
+            <div class="col-span-2 grid grid-cols-3 gap-6 pt-2">
+              <!-- 生成加速版 toggle -->
+              <label class="flex items-center justify-between gap-3 cursor-pointer">
+                <span class="text-sm font-medium">生成加速版 (1.25x)</span>
+                <button
+                  type="button"
+                  class="relative w-10 h-5 rounded-full transition-colors"
+                  :class="generateFast ? 'bg-primary' : 'bg-surface-container-highest'"
+                  @click="generateFast = !generateFast"
+                >
+                  <span
+                    class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+                    :class="generateFast ? 'translate-x-5' : ''"
+                  />
+                </button>
+              </label>
+              <!-- Hook 文字叠加 toggle -->
+              <label class="flex items-center justify-between gap-3 cursor-pointer">
+                <span class="text-sm font-medium">Hook 文字叠加</span>
+                <button
+                  type="button"
+                  class="relative w-10 h-5 rounded-full transition-colors"
+                  :class="enableHook ? 'bg-primary' : 'bg-surface-container-highest'"
+                  @click="enableHook = !enableHook"
+                >
+                  <span
+                    class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+                    :class="enableHook ? 'translate-x-5' : ''"
+                  />
+                </button>
+              </label>
+              <!-- 说话人识别 toggle -->
+              <label class="flex items-center justify-between gap-3 cursor-pointer">
+                <span class="text-sm font-medium">说话人识别</span>
+                <button
+                  type="button"
+                  class="relative w-10 h-5 rounded-full transition-colors"
+                  :class="enableDiarization ? 'bg-primary' : 'bg-surface-container-highest'"
+                  @click="enableDiarization = !enableDiarization"
+                >
+                  <span
+                    class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+                    :class="enableDiarization ? 'translate-x-5' : ''"
+                  />
+                </button>
+              </label>
+            </div>
+            <!-- Hook 配置 (conditionally shown when enableHook is true) -->
+            <div v-if="enableHook" class="col-span-2 grid grid-cols-2 gap-x-12 gap-y-4 pt-2 pl-1 border-l-2 border-primary/20">
+              <div class="space-y-2">
+                <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">Hook 文字 (开场吸引语)</label>
+                <input
+                  v-model="hookText"
+                  class="w-full bg-surface-container-highest border-none rounded-md py-3 px-4 text-sm focus:ring-2 focus:ring-primary/20"
+                  placeholder="例如：你绝对想不到..." type="text"
+                />
+              </div>
+              <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                  <label class="text-sm font-medium">Hook 持续时间</label>
+                  <span class="text-primary font-bold">{{ hookDuration.toFixed(1) }}s</span>
+                </div>
+                <input
+                  v-model.number="hookDuration"
+                  class="w-full h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary"
+                  type="range" min="1.0" max="10.0" step="0.5"
+                />
+              </div>
+            </div>
+          </div>
         </div>
-        <span class="hint">提高品牌名/产品名的识别准确率</span>
-      </div>
 
-      <!-- Output -->
-      <div class="settings-section">
-        <div class="section-title"><ExportOutlined /> 输出</div>
-        <div class="setting-row">
-          <label>默认输出目录</label>
-          <a-input v-model:value="outputDir" placeholder="不设置则输出到视频同目录" style="width: 320px;" />
-          <a-button>选择</a-button>
+        <!-- Output -->
+        <div class="bg-surface-container-low p-8 rounded-xl">
+          <div class="flex items-center gap-3 mb-6">
+            <span class="material-symbols-outlined text-primary">folder_open</span>
+            <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">输出管理</h3>
+          </div>
+          <div class="space-y-4">
+            <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">默认目录 (Output Path)</label>
+            <div class="flex gap-3">
+              <input v-model="outputDir" class="flex-1 bg-surface-container-highest border-none rounded-md py-3 px-4 text-sm text-on-surface-variant" placeholder="默认: 视频所在目录/output/" type="text" />
+              <button class="px-6 py-2 bg-white text-on-surface font-semibold text-sm rounded-md shadow-sm border border-outline-variant/10 hover:bg-surface-bright transition-all" @click="browseOutputDir">浏览</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Save -->
+        <div class="flex justify-end gap-4 pt-6">
+          <button class="px-8 py-3 text-sm font-bold text-on-surface-variant hover:text-on-surface transition-colors">恢复默认</button>
+          <button class="px-12 py-3 bg-primary text-white font-bold text-sm rounded-xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all" :class="{ 'opacity-50': saving }" @click="saveAllSettings">{{ saving ? '保存中...' : '保存全部更改' }}</button>
         </div>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.settings-page { display: flex; flex-direction: column; gap: 16px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; }
-.page-header h2 { margin: 0; font-size: 20px; }
-
-.settings-grid { display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
-
-.settings-section {
-  background: var(--bg-card);
-  border-radius: 10px;
-  padding: 20px;
-  border: 1px solid var(--border);
-}
-
-.section-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.setting-row label {
-  width: 100px;
-  flex-shrink: 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-align: right;
-}
-
-.hint {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-</style>

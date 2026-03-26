@@ -75,11 +75,12 @@ def _get_local_model():
 def _transcribe_local(
     video_path: str,
     hotwords: str = "",
+    enable_diarization: bool = True,
 ) -> list[TranscriptSegment]:
     """Transcribe using local FunASR model (VF1 mode — fast)."""
     model = _get_local_model()
     if model is None:
-        raise RuntimeError("Local FunASR model not available")
+        raise RuntimeError("语音识别模型未安装，请运行: pip install funasr torch")
 
     if hotwords:
         try:
@@ -107,6 +108,8 @@ def _transcribe_local(
                 text=item["text"].strip(),
                 speaker=speaker,
             ))
+        if not enable_diarization:
+            segments = [TranscriptSegment(start=s.start, end=s.end, text=s.text, speaker=None) for s in segments]
         return segments
 
     # Priority 2: word-level timestamps → split by punctuation
@@ -159,6 +162,7 @@ async def transcribe_video(
     video_path: str,
     funasr_url: str = "http://localhost:10095",
     hotwords: str = "",
+    enable_diarization: bool = True,
 ) -> list[TranscriptSegment]:
     """Transcribe video — uses local model (fast) with HTTP fallback.
 
@@ -176,14 +180,21 @@ async def transcribe_video(
 
     # Try local model first (10x faster than HTTP)
     try:
-        result = _transcribe_local(video_path, hotwords=hotwords)
+        result = _transcribe_local(video_path, hotwords=hotwords, enable_diarization=enable_diarization)
         if result:
             return result
     except Exception as exc:
-        logger.warning("Local FunASR failed, falling back to HTTP: %s", exc)
+        logger.warning("本地语音识别失败，尝试 HTTP 服务: %s", exc)
 
     # Fallback: HTTP API
-    return await _transcribe_http(video_path, funasr_url)
+    try:
+        return await _transcribe_http(video_path, funasr_url)
+    except Exception as exc:
+        raise RuntimeError(
+            f"语音识别失败: 本地模型未安装且 HTTP 服务 ({funasr_url}) 不可用。\n"
+            "请安装本地模型: pip install funasr torch\n"
+            "或启动 HTTP 服务: docker run -p 10095:10095 funasr-server"
+        ) from exc
 
 
 async def _transcribe_http(
@@ -218,6 +229,8 @@ async def _transcribe_http(
             with open(audio_path, "rb") as f:
                 response = await client.post(api_url, files={"file": ("audio.wav", f, "audio/wav")})
 
+        if response.status_code != 200:
+            raise RuntimeError(f"语音识别服务连接失败 (HTTP {response.status_code})，请确认 FunASR 服务已启动: {funasr_url}")
         data = response.json()
         segments = data.get("segments", [])
         return [

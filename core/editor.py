@@ -17,6 +17,7 @@ from moviepy import VideoFileClip, concatenate_videoclips
 from pydantic import BaseModel
 
 from core.config import CutPilotConfig, QUALITY_PRESETS
+from core.hwaccel import get_encoder_info, get_ffmpeg_params
 from core.models import ExportOptions, Sentence, ScriptVersion
 from core.overlay import burn_hook_overlay
 
@@ -202,14 +203,30 @@ async def rough_cut(
 # ---------------------------------------------------------------------------
 
 
+# Map config quality names to hwaccel quality tiers
+_QUALITY_TIER: dict[str, str] = {"draft": "low", "standard": "medium", "high": "high"}
+
+
 def _moviepy_cut_and_concat(
     source_path: str,
     time_spans: list[tuple[float, float]],
     output_path: str,
     quality: str = "standard",
 ) -> None:
-    """Load source once, subclip each span, concatenate, write output."""
-    preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["standard"])
+    """Load source once, subclip each span, concatenate, write output.
+
+    Uses hardware-accelerated encoder when available.
+    """
+    encoder = get_encoder_info()
+    tier = _QUALITY_TIER.get(quality, "medium")
+    ffmpeg_params = get_ffmpeg_params(tier)
+    # get_ffmpeg_params returns ["-c:v", codec, ...quality_params..., ...extra_params...]
+    # MoviePy's write_videofile takes codec separately, so we extract it
+    codec = encoder.codec
+    # Build remaining params (skip the -c:v and codec from the list)
+    extra = [p for i, p in enumerate(ffmpeg_params) if i >= 2]
+    extra.extend(["-pix_fmt", "yuv420p"])
+
     video = VideoFileClip(source_path)
     try:
         clips = []
@@ -228,9 +245,9 @@ def _moviepy_cut_and_concat(
             final.write_videofile(
                 output_path,
                 fps=video.fps or 30,
-                codec="libx264",
+                codec=codec,
                 audio_codec="aac",
-                ffmpeg_params=["-crf", preset["crf"], "-preset", preset["preset"], "-pix_fmt", "yuv420p"],
+                ffmpeg_params=extra,
                 logger=None,
             )
         finally:
@@ -238,7 +255,7 @@ def _moviepy_cut_and_concat(
     finally:
         video.close()
 
-    logger.info("MoviePy cut+concat: %d clips -> %s", len(time_spans), output_path)
+    logger.info("Cut+concat (%s): %d clips -> %s", encoder.name, len(time_spans), output_path)
 
 
 # ---------------------------------------------------------------------------

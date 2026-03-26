@@ -87,3 +87,10 @@ def add_history_entry(entry: HistoryEntry) -> None:
 def clear_history() -> None:
     """Clear all history entries."""
     save_history([])
+
+
+def delete_history_entry(timestamp: str) -> None:
+    """Delete a single history entry by timestamp."""
+    entries = load_history()
+    entries = [e for e in entries if e.get("timestamp") != timestamp]
+    save_history(entries)

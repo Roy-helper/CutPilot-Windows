@@ -1,41 +1,30 @@
-/* CutPilot — Minimal base theme
- *
- * This file provides only structural styles (layout, spacing, scrollbar).
- * Visual design (colors, fonts, shadows, effects) should be defined by
- * a UI designer and applied on top of this base.
- *
- * Ant Design Vue's default light theme is used as-is.
- */
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
-    "Helvetica Neue", sans-serif;
-  font-size: 14px;
-  overflow: hidden;
+  font-family: 'Inter', sans-serif;
 }
 
-#app {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
 }
 
-/* Scrollbar — subtle */
-::-webkit-scrollbar {
-  width: 6px;
+.glass-panel {
+  background: rgba(248, 249, 250, 0.85);
+  backdrop-filter: blur(20px);
 }
 
-::-webkit-scrollbar-track {
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 3px;
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #c7c4d8;
+  border-radius: 10px;
 }

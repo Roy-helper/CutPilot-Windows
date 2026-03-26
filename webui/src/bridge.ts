@@ -1,0 +1,250 @@
+/**
+ * CutPilot pywebview bridge — typed wrapper around window.pywebview.api.
+ *
+ * In dev mode (no pywebview), methods return mock data so the UI still works.
+ */
+
+interface PyWebViewAPI {
+  ping(): Promise<string>
+  get_machine_id(): Promise<string>
+  get_license_info(): Promise<Record<string, unknown>>
+  activate_license(code: string): Promise<{ success: boolean; message: string }>
+  load_settings(): Promise<Record<string, unknown>>
+  save_settings(settings: Record<string, unknown>): Promise<{ success: boolean; error?: string }>
+  get_providers(): Promise<ProviderPreset[]>
+  select_files(): Promise<string[]>
+  select_directory(): Promise<string>
+  open_folder(path: string): Promise<{ success: boolean; error?: string }>
+  get_history(): Promise<HistoryEntry[]>
+  clear_history(): Promise<{ success: boolean; error?: string }>
+  test_connection(provider: string, apiKey: string, baseUrl?: string, model?: string): Promise<{ success: boolean; error?: string; model?: string }>
+  process_video(videoPath: string, settingsOverride?: Record<string, unknown>): Promise<ProcessResult>
+  process_batch(videoPaths: string[]): Promise<ProcessResult[]>
+  is_processing(): Promise<boolean>
+  export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
+  get_encoder_info(): Promise<EncoderInfo>
+  get_max_parallel(): Promise<number>
+  preview_video(filePath: string): Promise<{ success: boolean; error?: string }>
+  get_output_files(videoPath: string): Promise<OutputFile[]>
+  delete_history_entry(timestamp: string): Promise<{ success: boolean; error?: string }>
+}
+
+export interface ProviderPreset {
+  id: string
+  name: string
+  base_url: string
+  model: string
+  api_key_hint: string
+}
+
+export interface HistoryEntry {
+  video_name: string
+  video_path: string
+  timestamp: string
+  success: boolean
+  error: string
+  versions_count: number
+  output_files: string[]
+  approach_tags: string[]
+  duration_sec: number
+}
+
+export interface ScriptVersion {
+  version_id: number
+  title: string
+  structure: string
+  sentence_ids: number[]
+  hook_text: string
+  why_it_may_work: string
+  reason: string
+  estimated_duration: number
+  score: number
+  publish_text: string
+  cover_title: string
+  cover_subtitle: string
+  tags: string[]
+  approach_tag: string
+}
+
+export interface ProcessResult {
+  success: boolean
+  error: string
+  versions: ScriptVersion[]
+  output_files: { version_id: number; path: string; speed: string; quality: string }[]
+}
+
+export interface OutputFile {
+  path: string
+  name: string
+  size_mb: number
+}
+
+export interface EncoderInfo {
+  codec: string
+  name: string
+  is_hardware: boolean
+  extra_params: string[]
+}
+
+declare global {
+  interface Window {
+    pywebview?: { api: PyWebViewAPI }
+  }
+}
+
+/** True when running inside pywebview (not browser dev mode). */
+export const isNative = (): boolean => !!window.pywebview?.api
+
+/**
+ * Get the pywebview API, or null in dev mode.
+ */
+function getApi(): PyWebViewAPI | null {
+  return window.pywebview?.api ?? null
+}
+
+// ── Bridge functions ───────────────────────────────────────
+
+export async function ping(): Promise<string> {
+  const api = getApi()
+  return api ? await api.ping() : 'pong (dev)'
+}
+
+export async function getMachineId(): Promise<string> {
+  const api = getApi()
+  return api ? await api.get_machine_id() : 'DEV-0000-0000-0000'
+}
+
+export async function getLicenseInfo(): Promise<Record<string, unknown>> {
+  const api = getApi()
+  return api ? await api.get_license_info() : { is_valid: false, status_message: '开发模式', expiry: null }
+}
+
+export async function activateLicense(code: string): Promise<{ success: boolean; message: string }> {
+  const api = getApi()
+  return api ? await api.activate_license(code) : { success: false, message: 'Dev mode' }
+}
+
+export async function loadSettings(): Promise<Record<string, unknown>> {
+  const api = getApi()
+  return api ? await api.load_settings() : {}
+}
+
+export async function saveSettings(settings: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const api = getApi()
+  return api ? await api.save_settings(settings) : { success: true }
+}
+
+export async function getProviders(): Promise<ProviderPreset[]> {
+  const api = getApi()
+  return api ? await api.get_providers() : [
+    { id: 'deepseek', name: 'DeepSeek', base_url: '', model: 'deepseek-chat', api_key_hint: 'sk-...' },
+    { id: 'qwen', name: '通义千问', base_url: '', model: 'qwen-plus', api_key_hint: 'sk-...' },
+  ]
+}
+
+export async function selectFiles(): Promise<string[]> {
+  const api = getApi()
+  return api ? await api.select_files() : []
+}
+
+export async function selectDirectory(): Promise<string> {
+  const api = getApi()
+  return api ? await api.select_directory() : ''
+}
+
+export async function openFolder(path: string): Promise<{ success: boolean; error?: string }> {
+  const api = getApi()
+  return api ? await api.open_folder(path) : { success: false, error: 'Dev mode' }
+}
+
+export async function getHistory(): Promise<HistoryEntry[]> {
+  const api = getApi()
+  return api ? await api.get_history() : []
+}
+
+export async function clearHistory(): Promise<{ success: boolean; error?: string }> {
+  const api = getApi()
+  return api ? await api.clear_history() : { success: true }
+}
+
+export async function testConnection(
+  provider: string, apiKey: string, baseUrl?: string, model?: string
+): Promise<{ success: boolean; error?: string; model?: string }> {
+  const api = getApi()
+  return api
+    ? await api.test_connection(provider, apiKey, baseUrl ?? '', model ?? '')
+    : { success: true, model: 'dev-mock' }
+}
+
+export async function processVideo(
+  videoPath: string, settingsOverride?: Record<string, unknown>
+): Promise<ProcessResult> {
+  const api = getApi()
+  return api
+    ? await api.process_video(videoPath, settingsOverride)
+    : { success: false, error: 'Dev mode — no backend', versions: [], output_files: [] }
+}
+
+export async function processBatch(videoPaths: string[]): Promise<ProcessResult[]> {
+  const api = getApi()
+  return api
+    ? await api.process_batch(videoPaths)
+    : videoPaths.map(() => ({ success: false, error: 'Dev mode', versions: [], output_files: [] }))
+}
+
+export async function isProcessing(): Promise<boolean> {
+  const api = getApi()
+  return api ? await api.is_processing() : false
+}
+
+export async function getEncoderInfo(): Promise<EncoderInfo> {
+  const api = getApi()
+  return api ? await api.get_encoder_info() : { codec: 'libx264', name: 'Software x264 (dev)', is_hardware: false, extra_params: [] }
+}
+
+export async function getMaxParallel(): Promise<number> {
+  const api = getApi()
+  return api ? await api.get_max_parallel() : 2
+}
+
+export async function exportVersions(
+  videoPath: string, versionIds: number[], options?: Record<string, unknown>
+): Promise<{ success: boolean; files?: unknown[]; error?: string }> {
+  const api = getApi()
+  return api
+    ? await api.export_versions(videoPath, versionIds, options)
+    : { success: false, error: 'Dev mode' }
+}
+
+export async function previewVideo(filePath: string): Promise<{ success: boolean; error?: string }> {
+  const api = getApi()
+  return api ? await api.preview_video(filePath) : { success: false, error: 'Dev mode' }
+}
+
+export async function getOutputFiles(videoPath: string): Promise<OutputFile[]> {
+  const api = getApi()
+  return api ? await api.get_output_files(videoPath) : []
+}
+
+export async function deleteHistoryEntry(timestamp: string): Promise<{ success: boolean; error?: string }> {
+  const api = getApi()
+  return api ? await api.delete_history_entry(timestamp) : { success: true }
+}
+
+// ── Progress event listener ────────────────────────────────
+
+export interface ProgressEvent {
+  label: string
+  percent: number
+  index?: number  // video index in batch
+  total?: number  // total videos in batch
+}
+
+export function onPipelineProgress(callback: (e: ProgressEvent) => void): () => void {
+  const handler = (evt: Event) => {
+    const detail = (evt as CustomEvent).detail as ProgressEvent
+    callback(detail)
+  }
+  window.addEventListener('pipeline-progress', handler)
+  return () => window.removeEventListener('pipeline-progress', handler)
+}

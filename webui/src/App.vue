@@ -1,98 +1,55 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { RouterView, useRouter } from 'vue-router'
-import {
-  SettingOutlined,
-  HistoryOutlined,
-  ScissorOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons-vue'
+import { ref, onMounted } from 'vue'
+import { RouterView } from 'vue-router'
+import SideNav from '@/components/SideNav.vue'
+import { useNotificationStore } from '@/stores/notifications'
 
-const router = useRouter()
-const selectedKey = ref(['workspace'])
-const collapsed = ref(false)
+const devMode = ref(false)
+const licenseBanner = ref('')
+const licenseBannerLevel = ref<'info' | 'error'>('info')
 
-const menuItems = [
-  { key: 'workspace', icon: ScissorOutlined, label: '工作台', path: '/' },
-  { key: 'history', icon: HistoryOutlined, label: '历史记录', path: '/history' },
-  { key: 'settings', icon: SettingOutlined, label: '设置', path: '/settings' },
-]
+onMounted(() => {
+  // pywebview injects window.pywebview AFTER DOM load via pywebviewready event.
+  // Check with delay to avoid false "dev mode" detection.
+  const checkNative = () => {
+    devMode.value = !window.pywebview?.api
+  }
 
-function onMenuClick(item: any) {
-  const found = menuItems.find(m => m.key === item.key)
-  if (found) router.push(found.path)
-}
+  // If already injected (fast load), check now
+  if (window.pywebview?.api) {
+    devMode.value = false
+  } else {
+    // Wait for pywebview to inject, or confirm dev mode after timeout
+    window.addEventListener('pywebviewready', () => { devMode.value = false }, { once: true })
+    globalThis.setTimeout(checkNative, 2000)
+  }
+
+  // Listen for license warnings from pywebview bridge
+  window.addEventListener('license-warning', (evt: Event) => {
+    const detail = (evt as CustomEvent).detail
+    licenseBanner.value = detail.message
+    licenseBannerLevel.value = detail.level ?? 'info'
+    const notify = useNotificationStore()
+    notify.add(detail.level === 'error' ? 'error' : 'info', detail.message)
+  })
+})
 </script>
 
 <template>
-  <a-layout style="height: 100vh">
-    <a-layout-sider
-      v-model:collapsed="collapsed"
-      :trigger="null"
-      collapsible
-      :width="200"
-      :collapsed-width="64"
-    >
-      <div class="logo-area" @click="collapsed = !collapsed">
-        <ThunderboltOutlined class="logo-icon" />
-        <span v-show="!collapsed" class="logo-text">CutPilot</span>
-      </div>
-
-      <a-menu
-        v-model:selectedKeys="selectedKey"
-        theme="light"
-        mode="inline"
-        @click="onMenuClick"
-      >
-        <a-menu-item v-for="item in menuItems" :key="item.key">
-          <component :is="item.icon" />
-          <span>{{ item.label }}</span>
-        </a-menu-item>
-      </a-menu>
-
-      <div v-show="!collapsed" class="version-tag">v0.2.0</div>
-    </a-layout-sider>
-
-    <a-layout>
-      <a-layout-content class="main-content">
-        <RouterView />
-      </a-layout-content>
-    </a-layout>
-  </a-layout>
+  <div class="min-h-screen">
+    <!-- Dev mode banner -->
+    <div v-if="devMode" class="fixed top-0 left-64 right-0 z-[60] bg-amber-500 text-white text-center text-xs py-1 font-medium">
+      开发模式 — 后端未连接，数据为模拟值
+    </div>
+    <!-- License banner -->
+    <div v-if="licenseBanner" class="fixed top-0 left-64 right-0 z-[59] text-center text-xs py-1.5 font-medium"
+      :class="licenseBannerLevel === 'error' ? 'bg-error text-white' : 'bg-primary-fixed text-on-primary-fixed'">
+      {{ licenseBanner }}
+      <button class="ml-4 underline" @click="licenseBanner = ''">关闭</button>
+    </div>
+    <SideNav />
+    <main class="pl-64 min-h-screen" :class="{ 'pt-6': devMode || licenseBanner }">
+      <RouterView />
+    </main>
+  </div>
 </template>
-
-<style scoped>
-.logo-area {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 20px 24px 16px;
-  cursor: pointer;
-}
-
-.logo-icon {
-  font-size: 24px;
-  color: #6c5ce7;
-}
-
-.logo-text {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.main-content {
-  padding: 24px;
-  overflow-y: auto;
-}
-
-.version-tag {
-  position: absolute;
-  bottom: 16px;
-  left: 0;
-  width: 100%;
-  text-align: center;
-  font-size: 11px;
-  color: #999;
-}
-</style>

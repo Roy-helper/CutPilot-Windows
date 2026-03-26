@@ -38,6 +38,7 @@ _DEFAULTS: dict[str, Any] = {
 def load_user_settings() -> dict[str, Any]:
     """Load settings from JSON, returning defaults for missing keys."""
     settings = dict(_DEFAULTS)
+    settings["_settings_corrupted"] = False
     if not _SETTINGS_PATH.exists():
         return settings
     try:
@@ -45,6 +46,7 @@ def load_user_settings() -> dict[str, Any]:
         stored = json.loads(raw)
         if not isinstance(stored, dict):
             logger.warning("settings.json root is not a dict, using defaults")
+            settings["_settings_corrupted"] = True
             return settings
         for key in _DEFAULTS:
             if key in stored:
@@ -52,6 +54,7 @@ def load_user_settings() -> dict[str, Any]:
         return settings
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to load settings.json: %s", exc)
+        settings["_settings_corrupted"] = True
         return settings
 
 

@@ -110,7 +110,10 @@ async def _run_asr(
 
     from core.asr import transcribe_video
 
-    segments = await transcribe_video(str(video_path), hotwords=hotwords)
+    segments = await transcribe_video(
+        str(video_path), hotwords=hotwords,
+        enable_diarization=config.enable_speaker_diarization,
+    )
     sentences = [
         Sentence(
             id=i + 1,
@@ -209,6 +212,59 @@ def _report_progress(
     """Fire progress callback if provided."""
     if callback is not None:
         callback(label, percent)
+
+
+async def process_batch(
+    video_paths: list[Path],
+    config: CutPilotConfig,
+    on_progress: Callable[[str, int, int], None] | None = None,
+    cache: CacheManager | None = None,
+    hotwords: str = "",
+    max_parallel: int | None = None,
+) -> list[ProcessResult]:
+    """Process multiple videos with controlled concurrency.
+
+    Args:
+        video_paths: List of video file paths to process.
+        config: CutPilot configuration.
+        on_progress: Optional callback ``(video_name, video_index, percent)``.
+        cache: Optional cache manager.
+        hotwords: Hotwords for ASR.
+        max_parallel: Max concurrent video jobs. If None, auto-detected
+            from hardware encoder capabilities.
+
+    Returns:
+        List of ProcessResult in the same order as video_paths.
+    """
+    if cache is None:
+        cache = CacheManager()
+
+    if max_parallel is None:
+        from core.hwaccel import get_max_parallel
+        max_parallel = get_max_parallel()
+
+    semaphore = asyncio.Semaphore(max_parallel)
+    logger.info("Batch processing %d videos (max_parallel=%d)", len(video_paths), max_parallel)
+
+    async def _process_one(index: int, vpath: Path) -> ProcessResult:
+        async with semaphore:
+            video_name = vpath.name
+
+            def per_video_progress(label: str, percent: int) -> None:
+                if on_progress is not None:
+                    on_progress(video_name, index, percent)
+
+            return await process_video(
+                video_path=vpath,
+                config=config,
+                on_progress=per_video_progress,
+                cache=cache,
+                hotwords=hotwords,
+            )
+
+    tasks = [_process_one(i, p) for i, p in enumerate(video_paths)]
+    results = await asyncio.gather(*tasks)
+    return list(results)
 
 
 def generate_copy_text(versions: list[ScriptVersion]) -> str:

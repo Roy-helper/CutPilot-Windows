@@ -54,11 +54,93 @@ def _build_numbered_text(sentences: list[Sentence]) -> str:
     return "\n".join(f"{s.id}. {s.text}" for s in sentences)
 
 
+_BROKEN_HASHTAG_QUOTED_RE = re.compile(r'#"([^"]*)"')  # #"tag" → "#tag"
+_BROKEN_HASHTAG_BARE_RE = re.compile(r'(?<=[\[,])\s*#([\w\u4e00-\u9fff]+)')  # #tag → "#tag"
+_TRAILING_COMMA_RE = re.compile(r",\s*([\]}])")  # trailing comma before ] or }
+
+
+def _fix_json_quirks(text: str) -> str:
+    """Fix common JSON quirks from LLM responses.
+
+    Known issues:
+    - ``#"tag"`` instead of ``"#tag"`` in arrays
+    - ``#tag`` (bare, no quotes at all) in arrays
+    - Trailing commas before ``]`` or ``}``
+    - Chinese quotation marks ``\u201c\u201d`` instead of ``""``
+    """
+    text = text.replace("\u201c", '"').replace("\u201d", '"')  # Chinese quotes
+    text = _BROKEN_HASHTAG_QUOTED_RE.sub(r'"#\1"', text)
+    text = _BROKEN_HASHTAG_BARE_RE.sub(r' "#\1"', text)
+    text = _TRAILING_COMMA_RE.sub(r"\1", text)
+    return text
+
+
+def _repair_json_strings(text: str) -> str:
+    """Escape unescaped double quotes inside JSON string values.
+
+    DeepSeek sometimes embeds raw ``"`` inside string values, e.g.:
+    ``"why": "小户型用户"客厅小"的痛点"``
+    This finds such cases and replaces the inner ``"`` with ``\\"``.
+    """
+    result: list[str] = []
+    i = 0
+    n = len(text)
+
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            # Start of a JSON string — find the true end
+            result.append('"')
+            i += 1
+            while i < n:
+                c = text[i]
+                if c == '\\':
+                    result.append(c)
+                    i += 1
+                    if i < n:
+                        result.append(text[i])
+                        i += 1
+                    continue
+                if c == '"':
+                    # Is this the true end of the string?
+                    # Look ahead: should be followed by , : ] } or whitespace+one of those
+                    rest = text[i + 1:].lstrip()
+                    if not rest or rest[0] in ',:]}':
+                        result.append('"')
+                        i += 1
+                        break
+                    else:
+                        # Unescaped quote inside value — escape it
+                        result.append('\\"')
+                        i += 1
+                        continue
+                result.append(c)
+                i += 1
+        else:
+            result.append(ch)
+            i += 1
+
+    return "".join(result)
+
+
 def _extract_json(raw_text: str) -> dict:
-    """Parse JSON from raw API text, stripping markdown fences if present."""
+    """Parse JSON from raw API text, stripping markdown fences if present.
+
+    Applies common quirk fixes and string repair before parsing.
+    """
     fence_match = _JSON_FENCE_RE.search(raw_text)
     text = fence_match.group(1) if fence_match else raw_text
-    return json.loads(text.strip())
+    text = _fix_json_quirks(text.strip())
+
+    # Fast path: try parsing directly
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Slow path: repair unescaped quotes inside string values
+    repaired = _repair_json_strings(text)
+    return json.loads(repaired)
 
 
 def _strip_think_tags(text: str) -> str:
