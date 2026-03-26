@@ -17,8 +17,8 @@ const minSentences = ref(5)
 const quality = ref('1080P')
 const hookText = ref('')
 const generateFast = ref(true)
-const enableHook = ref(true)
-const enableDiarization = ref(true)
+const enableHook = ref(false)
+const enableDiarization = ref(false)
 const hookDuration = ref(3.0)
 
 const hotwords = ref('')
@@ -47,6 +47,8 @@ const activateResult = ref('')
 const providers = ref<{ id: string; name: string }[]>([])
 const testResult = ref<string | null>(null)
 const saving = ref(false)
+const saveMsg = ref<string | null>(null)
+const saveMsgType = ref<'success' | 'error'>('success')
 const detectedEncoder = ref('自动检测中...')
 const detectedParallel = ref(0)
 const asrModelReady = ref(false)
@@ -128,21 +130,35 @@ async function testConnection() {
 
 async function saveAllSettings() {
   saving.value = true
-  await bridgeSave({
-    provider: provider.value,
-    api_key: apiKey.value,
-    max_versions: maxVersions.value,
-    min_sentences: minSentences.value,
-    video_quality: qualityToBackend[quality.value] ?? 'standard',
-    hotwords: hotwords.value,
-    output_dir: outputDir.value,
-    hook_text: hookText.value,
-    generate_fast: generateFast.value,
-    enable_hook_overlay: enableHook.value,
-    enable_speaker_diarization: enableDiarization.value,
-    hook_duration: hookDuration.value,
-  })
+  saveMsg.value = null
+  try {
+    const res = await bridgeSave({
+      provider: provider.value,
+      api_key: apiKey.value,
+      max_versions: maxVersions.value,
+      min_sentences: minSentences.value,
+      video_quality: qualityToBackend[quality.value] ?? 'standard',
+      hotwords: hotwords.value,
+      output_dir: outputDir.value,
+      hook_text: hookText.value,
+      generate_fast: generateFast.value,
+      enable_hook_overlay: enableHook.value,
+      enable_speaker_diarization: enableDiarization.value,
+      hook_duration: hookDuration.value,
+    })
+    if (res && res.error) {
+      saveMsgType.value = 'error'
+      saveMsg.value = `保存失败: ${res.error}`
+    } else {
+      saveMsgType.value = 'success'
+      saveMsg.value = '保存完成'
+    }
+  } catch (e: any) {
+    saveMsgType.value = 'error'
+    saveMsg.value = `保存失败: ${e.message || e}`
+  }
   saving.value = false
+  setTimeout(() => { saveMsg.value = null }, 3000)
 }
 
 async function browseOutputDir() {
@@ -429,7 +445,8 @@ async function browseOutputDir() {
         </div>
 
         <!-- Save -->
-        <div class="flex justify-end gap-4 pt-6">
+        <div class="flex justify-end items-center gap-4 pt-6">
+          <span v-if="saveMsg" class="text-sm font-semibold transition-opacity" :class="saveMsgType === 'success' ? 'text-green-600' : 'text-error'">{{ saveMsg }}</span>
           <button class="px-8 py-3 text-sm font-bold text-on-surface-variant hover:text-on-surface transition-colors">恢复默认</button>
           <button class="px-12 py-3 bg-primary text-white font-bold text-sm rounded-xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all" :class="{ 'opacity-50': saving }" @click="saveAllSettings">{{ saving ? '保存中...' : '保存全部更改' }}</button>
         </div>

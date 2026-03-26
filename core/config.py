@@ -27,11 +27,11 @@ class CutPilotConfig(BaseSettings):
     generate_fast: bool = True
 
     # Hook overlay
-    enable_hook_overlay: bool = True
+    enable_hook_overlay: bool = False
     hook_duration: float = 3.0
 
     # Speaker diarization
-    enable_speaker_diarization: bool = True
+    enable_speaker_diarization: bool = False
 
     # Video quality preset
     # - draft: fast encode, lower quality (CRF 28, ultrafast) — for preview
