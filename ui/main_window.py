@@ -5,7 +5,7 @@ Dark-themed professional desktop UI for e-commerce video automation.
 from __future__ import annotations
 
 import shutil
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
         entry = HistoryEntry(
             video_name=filename,
             video_path=video_path,
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             success=result.success,
             error=result.error,
             versions_count=len(result.versions),
