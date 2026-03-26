@@ -231,14 +231,20 @@ def get_ffmpeg_params(quality: str = "medium") -> list[str]:
 def get_max_parallel() -> int:
     """Return the recommended number of parallel encode jobs.
 
-    Hardware encoders offload work to dedicated silicon, so more
-    parallelism is safe.  Software encoding is CPU-bound, so we
-    limit to half the available cores.
+    Based on encoder type and actual CPU core count:
+    - Hardware encoder (VideoToolbox/NVENC/QSV): limited by encoder channels,
+      typically min(cpu_cores, 8) — hardware handles encoding, CPU still does
+      ASR + AI calls + MoviePy processing.
+    - Software encoder (libx264): CPU-bound, use half the cores to avoid
+      overloading during AI API calls.
     """
     cpu_count = os.cpu_count() or 2
     encoder = get_encoder_info()
 
     if encoder.is_hardware:
-        return min(cpu_count, 4)
+        # Hardware encoder: CPU is free for ASR/AI, allow more parallelism
+        # but cap at 8 to avoid memory issues with large videos
+        return min(cpu_count, 8)
 
+    # Software: heavy CPU usage per encode, be conservative
     return max(1, cpu_count // 2)
