@@ -63,7 +63,7 @@ async def cut_versions(
         list of {"version_id": int, "path": str, "speed": str, "quality": str}
     """
     sentence_map: dict[int, Sentence] = {s.id: s for s in sentences}
-    output_dir = Path(config.output_dir) if config.output_dir else video_path.parent / "output"
+    output_dir = Path(config.output_dir).expanduser() if config.output_dir else video_path.parent / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = video_path.stem
 

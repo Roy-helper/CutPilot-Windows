@@ -63,8 +63,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function importFiles() {
     const paths = await selectFiles()
+    const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.flv', '.wmv']
+    const invalidExts = ['.downloading', '.tmp', '.part', '.crdownload']
+    const notify = useNotificationStore()
+
     for (const p of paths) {
       const name = p.split('/').pop() ?? p
+      const lower = name.toLowerCase()
+
+      // Reject files still downloading
+      if (invalidExts.some(ext => lower.endsWith(ext))) {
+        notify.add('error', '文件未下载完成', `${name} 还在下载中，请等下载完成后再导入`)
+        continue
+      }
+
+      // Reject non-video files
+      if (!videoExts.some(ext => lower.endsWith(ext))) {
+        notify.add('error', '不支持的文件格式', `${name} 不是支持的视频格式`)
+        continue
+      }
+
       if (!files.value.some(f => f.path === p)) {
         files.value.push({
           name, path: p, icon: 'video_library',
