@@ -256,31 +256,35 @@ def get_model_status() -> dict:
 def download_model() -> dict:
     """Download faster-whisper small model to ~/.cutpilot/models/.
 
+    Uses Chinese HuggingFace mirror (hf-mirror.com) to avoid GFW issues.
+
     Returns:
         {"success": bool, "message": str}
     """
+    import os
+    # Use Chinese mirror for HuggingFace (blocked in mainland China)
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
+    _MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir = str(_MODEL_DIR / "faster-whisper-small")
+
     try:
-        from faster_whisper.utils import download_model as fw_download
-        _MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        output_dir = str(_MODEL_DIR / "faster-whisper-small")
-        logger.info("下载 Whisper 语音模型到 %s...", output_dir)
-        fw_download("small", output_dir=output_dir)
+        from huggingface_hub import snapshot_download
+        logger.info("下载语音模型到 %s (使用国内镜像)...", output_dir)
+        snapshot_download(
+            "Systran/faster-whisper-small",
+            local_dir=output_dir,
+            local_dir_use_symlinks=False,
+        )
         logger.info("语音模型下载完成")
-        return {"success": True, "message": "语音模型下载完成"}
-    except ImportError:
-        # Fallback: use huggingface_hub directly
-        try:
-            from huggingface_hub import snapshot_download
-            _MODEL_DIR.mkdir(parents=True, exist_ok=True)
-            output_dir = str(_MODEL_DIR / "faster-whisper-small")
-            snapshot_download("Systran/faster-whisper-small",
-                              local_dir=output_dir, local_dir_use_symlinks=False)
-            return {"success": True, "message": "语音模型下载完成"}
-        except Exception as e:
-            return {"success": False, "message": f"下载失败: {e}"}
+        return {"success": True, "message": "语音模型下载完成！"}
     except Exception as e:
         logger.exception("模型下载失败")
-        return {"success": False, "message": f"下载失败: {e}"}
+        # Friendly Chinese error
+        err = str(e)
+        if "connect" in err.lower() or "network" in err.lower():
+            return {"success": False, "message": "网络连接失败，请检查网络后重试"}
+        return {"success": False, "message": f"下载失败: {err[:100]}"}
 
 
 def _get_fw_model():
