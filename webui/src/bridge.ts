@@ -21,6 +21,7 @@ interface PyWebViewAPI {
   process_video(videoPath: string, settingsOverride?: Record<string, unknown>): Promise<ProcessResult>
   process_batch(videoPaths: string[]): Promise<ProcessResult[]>
   is_processing(): Promise<boolean>
+  cancel_processing(): Promise<{ success: boolean; error?: string }>
   export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
   get_encoder_info(): Promise<EncoderInfo>
   get_max_parallel(): Promise<number>
@@ -228,6 +229,11 @@ export async function processBatch(videoPaths: string[]): Promise<ProcessResult[
   return api
     ? await api.process_batch(videoPaths)
     : videoPaths.map(() => ({ success: false, error: 'Dev mode', versions: [], output_files: [] }))
+}
+
+export async function cancelProcessing(): Promise<{ success: boolean; error?: string }> {
+  const api = await waitForApi()
+  return api ? await api.cancel_processing() : { success: false, error: 'Dev mode' }
 }
 
 export async function getEncoderInfo(): Promise<EncoderInfo> {

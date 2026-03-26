@@ -63,6 +63,14 @@ onUnmounted(() => {
 
 const notify = useNotificationStore()
 
+function copyAllVersionText() {
+  const blocks = store.versions.map((v, i) => {
+    return `=== V${i + 1} [${v.tags.join(', ')}] ===\n发布文案: ${v.description}\n封面主标题: ${v.title}\n标签: ${v.hashtags.join(' ')}`
+  })
+  navigator.clipboard.writeText(blocks.join('\n\n'))
+  notify.add('info', '已复制全部文案', `${store.versions.length} 个版本`)
+}
+
 function copyVersionText(ver: { title: string; description: string; hashtags: string[] }) {
   const text = `${ver.title}\n\n${ver.description}\n\n${ver.hashtags.join(' ')}`
   navigator.clipboard.writeText(text)
@@ -91,16 +99,26 @@ const fileStatusDot: Record<string, string> = {
         @click="store.openOutputFolder()"
       >打开目录</button>
       <button
+        v-if="store.hasVersions"
+        class="px-4 py-2 text-on-surface-variant text-sm font-medium hover:bg-surface-variant rounded-md transition-all"
+        @click="copyAllVersionText"
+      >复制全部文案</button>
+      <button
         class="px-4 py-2 bg-surface-container-high text-on-surface text-sm font-medium rounded-md hover:bg-surface-container-highest transition-all disabled:opacity-30"
         :disabled="store.selectedVersions.length === 0 || store.isExporting"
         @click="store.exportSelected()"
       >{{ store.isExporting ? '导出中...' : `导出选中${store.selectedVersions.length > 0 ? ` (${store.selectedVersions.length})` : ''}` }}</button>
       <button
-        class="px-6 py-2 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50"
-        :class="store.isProcessing ? 'bg-outline animate-pulse' : 'bg-gradient-to-b from-primary to-primary-container'"
-        :disabled="store.isProcessing || store.pendingFiles.length === 0"
+        v-if="store.isProcessing"
+        class="px-6 py-2 text-white text-sm font-bold rounded-xl shadow-lg shadow-error/20 active:scale-95 transition-all bg-error hover:bg-error/80 flex items-center gap-1.5"
+        @click="store.cancelGenerate()"
+      ><span class="material-symbols-outlined text-base">stop_circle</span>取消处理</button>
+      <button
+        v-else
+        class="px-6 py-2 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 bg-gradient-to-b from-primary to-primary-container"
+        :disabled="store.pendingFiles.length === 0"
         @click="store.generate()"
-      >{{ store.isProcessing ? '处理中...' : '一键生成' }}</button>
+      >一键生成</button>
     </template>
   </TopBar>
 
@@ -139,15 +157,11 @@ const fileStatusDot: Record<string, string> = {
       <div
         v-if="!store.hasFiles"
         class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-outline-variant/40 rounded-xl cursor-pointer hover:border-primary hover:bg-primary-fixed/10 transition-all group"
-        :class="{ 'border-primary bg-primary-fixed/10': isDragging }"
         @click="store.importFiles()"
-        @dragover.prevent="isDragging = true"
-        @dragleave="isDragging = false"
-        @drop.prevent="handleDrop"
       >
         <span class="material-symbols-outlined text-4xl text-on-surface-variant/30 group-hover:text-primary transition-colors mb-3">upload_file</span>
-        <p class="text-sm font-semibold text-on-surface-variant/60 group-hover:text-on-surface transition-colors">拖入视频文件</p>
-        <p class="text-[10px] text-on-surface-variant/40 mt-1">或点击选择文件</p>
+        <p class="text-sm font-semibold text-on-surface-variant/60 group-hover:text-on-surface transition-colors">选择视频文件</p>
+        <p class="text-[10px] text-on-surface-variant/40 mt-1">点击导入本地视频</p>
         <p class="text-[10px] text-outline mt-3">支持 MP4 / MOV / AVI / MKV</p>
       </div>
 
@@ -190,7 +204,7 @@ const fileStatusDot: Record<string, string> = {
         <h2 class="text-sm font-bold tracking-tight text-on-surface uppercase">生成版本</h2>
         <div class="flex gap-2">
           <button
-            v-for="f in [{ id: 'all', label: '全部' }, { id: 'top', label: '高分优先' }, { id: 'new', label: '最新' }]"
+            v-for="f in [{ id: 'all', label: '全部' }, { id: 'top', label: '高分优先' }]"
             :key="f.id"
             class="px-3 py-1 text-[10px] font-bold rounded-full uppercase"
             :class="activeFilter === f.id ? 'bg-surface-container text-on-surface' : 'text-on-surface-variant'"
@@ -237,6 +251,10 @@ const fileStatusDot: Record<string, string> = {
           </div>
 
           <div class="p-4">
+            <p class="text-[10px] text-on-surface-variant truncate mb-2" :title="ver.videoPath">
+              <span class="material-symbols-outlined text-[10px] align-middle mr-0.5">video_file</span>
+              {{ ver.videoPath.split(/[/\\]/).pop() }}
+            </p>
             <div class="flex items-center justify-between mb-3">
               <div class="flex gap-2">
                 <span v-for="tag in ver.tags" :key="tag" class="px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-bold rounded uppercase">{{ tag }}</span>

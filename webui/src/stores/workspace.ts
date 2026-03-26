@@ -8,6 +8,7 @@ import { defineStore } from 'pinia'
 import {
   selectFiles, processBatch, exportVersions, getEncoderInfo, getMaxParallel,
   previewVideo, openFolder, checkAsrStatus, runBenchmark, generateThumbnail,
+  cancelProcessing,
   type ProcessResult, type EncoderInfo,
 } from '@/bridge'
 import { useNotificationStore } from './notifications'
@@ -213,6 +214,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  async function cancelGenerate() {
+    if (!isProcessing.value) return
+    await cancelProcessing()
+    isProcessing.value = false
+    progress.value = 0
+    progressText.value = ''
+    // Reset any files that were in 'processing' state back to 'pending'
+    for (const file of files.value) {
+      if (file.status === 'processing') {
+        file.status = 'pending'
+        file.statusLabel = '已取消'
+      }
+    }
+    const notify = useNotificationStore()
+    notify.add('info', '已取消处理', '视频处理已被取消')
+  }
+
   async function exportSelected() {
     const selected = selectedVersions.value
     if (selected.length === 0) return
@@ -285,7 +303,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     files, versions, progress, progressText, isProcessing, isExporting,
     encoderName, maxParallel,
     pendingFiles, selectedVersions, hasFiles, hasVersions,
-    detectEncoder, importFiles, addDroppedFiles, generate,
+    detectEncoder, importFiles, addDroppedFiles, generate, cancelGenerate,
     exportSelected, clear, updateFileProgress, preview, openOutputFolder,
   }
 })

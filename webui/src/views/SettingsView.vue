@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted, nextTick } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import TopBar from '@/components/TopBar.vue'
 import {
   getMachineId, getLicenseInfo, activateLicense, loadSettings, saveSettings as bridgeSave,
@@ -13,9 +14,8 @@ const apiKey = ref('')
 const showApiKey = ref(false)
 
 const maxVersions = ref(3)
-const minSentences = ref(5)
+const minSentences = ref(15)
 const quality = ref('1080P')
-const hookText = ref('')
 const generateFast = ref(true)
 const enableHook = ref(false)
 const enableDiarization = ref(false)
@@ -55,6 +55,7 @@ const asrEngine = ref('faster-whisper')
 const asrModelReady = ref(false)
 const asrDownloading = ref(false)
 const asrDownloadMsg = ref('')
+const isDirty = ref(false)
 
 onMounted(async () => {
   try {
@@ -76,7 +77,6 @@ onMounted(async () => {
     if (s.video_quality) quality.value = qualityFromBackend[s.video_quality as string] ?? '1080P'
     if (s.hotwords) hotwords.value = s.hotwords as string
     if (s.output_dir) outputDir.value = s.output_dir as string
-    if (s.hook_text) hookText.value = s.hook_text as string
     if (s.generate_fast != null) generateFast.value = s.generate_fast as boolean
     if (s.enable_hook_overlay != null) enableHook.value = s.enable_hook_overlay as boolean
     if (s.asr_engine) asrEngine.value = s.asr_engine as string
@@ -94,6 +94,25 @@ onMounted(async () => {
     const asr = await checkAsrStatus(asrEngine.value)
     asrModelReady.value = asr.ready
   } catch { /* dev mode */ }
+
+  // Mark clean after initial load, then watch for changes
+  await nextTick()
+  isDirty.value = false
+  watch(
+    [provider, apiKey, maxVersions, minSentences, quality,
+     generateFast, enableHook, enableDiarization, hookDuration, hotwords,
+     outputDir, asrEngine],
+    () => { isDirty.value = true },
+  )
+})
+
+onBeforeRouteLeave((_to, _from, next) => {
+  if (isDirty.value && !saving.value) {
+    const leave = confirm('有未保存的设置更改，确定要离开吗？')
+    next(leave)
+  } else {
+    next()
+  }
 })
 
 function copyMachineId() {
@@ -156,7 +175,6 @@ async function saveAllSettings() {
       asr_engine: asrEngine.value,
       hotwords: hotwords.value,
       output_dir: outputDir.value,
-      hook_text: hookText.value,
       generate_fast: generateFast.value,
       enable_hook_overlay: enableHook.value,
       enable_speaker_diarization: enableDiarization.value,
@@ -168,6 +186,7 @@ async function saveAllSettings() {
     } else {
       saveMsgType.value = 'success'
       saveMsg.value = '保存完成'
+      isDirty.value = false
     }
   } catch (e: any) {
     saveMsgType.value = 'error'
@@ -182,9 +201,8 @@ function resetToDefaults() {
   provider.value = 'deepseek'
   apiKey.value = ''
   maxVersions.value = 3
-  minSentences.value = 5
+  minSentences.value = 15
   quality.value = '1080P'
-  hookText.value = ''
   generateFast.value = true
   enableHook.value = false
   asrEngine.value = 'faster-whisper'
@@ -202,7 +220,7 @@ async function browseOutputDir() {
 </script>
 
 <template>
-  <TopBar search-placeholder="搜索设置项..." />
+  <TopBar search-placeholder="" />
 
   <div class="max-w-[1280px] mx-auto p-12">
     <div class="mb-10">
@@ -452,14 +470,6 @@ async function browseOutputDir() {
             </div>
             <!-- Hook 配置 (conditionally shown when enableHook is true) -->
             <div v-if="enableHook" class="col-span-2 grid grid-cols-2 gap-x-12 gap-y-4 pt-2 pl-1 border-l-2 border-primary/20">
-              <div class="space-y-2">
-                <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">Hook 文字 (开场吸引语)</label>
-                <input
-                  v-model="hookText"
-                  class="w-full bg-surface-container-highest border-none rounded-md py-3 px-4 text-sm focus:ring-2 focus:ring-primary/20"
-                  placeholder="例如：你绝对想不到..." type="text"
-                />
-              </div>
               <div class="space-y-4">
                 <div class="flex justify-between items-center">
                   <label class="text-sm font-medium">Hook 持续时间</label>

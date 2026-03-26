@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,6 +26,7 @@ async def process_video(
     on_progress: Callable[[str, int], None] | None = None,
     cache: CacheManager | None = None,
     hotwords: str = "",
+    cancel_event: threading.Event | None = None,
 ) -> ProcessResult:
     """Process a single video through the full pipeline.
 
@@ -40,6 +42,7 @@ async def process_video(
         on_progress: Optional callback ``(stage_label, percent)`` for UI.
         cache: Optional cache manager (auto-created if None).
         hotwords: Space-separated hotwords for ASR boosting.
+        cancel_event: Optional threading.Event to signal cancellation.
 
     Returns:
         ProcessResult with success status, approved versions, and output files.
@@ -53,6 +56,8 @@ async def process_video(
 
     try:
         # Step 1: ASR
+        if cancel_event and cancel_event.is_set():
+            return ProcessResult(success=False, error="用户取消处理")
         sentences = await _run_asr(video_path, config, cache, hotwords, on_progress)
         if len(sentences) < config.min_sentences:
             return ProcessResult(
@@ -61,11 +66,15 @@ async def process_video(
             )
 
         # Step 2: Director
+        if cancel_event and cancel_event.is_set():
+            return ProcessResult(success=False, error="用户取消处理")
         versions = await _run_director(sentences, config, cache, video_path, on_progress)
         if not versions:
             return ProcessResult(success=False, error="AI 编导未生成有效版本")
 
         # Step 3: Inspector
+        if cancel_event and cancel_event.is_set():
+            return ProcessResult(success=False, error="用户取消处理")
         approved = await _run_inspector(
             versions, sentences, config, cache, video_path, on_progress,
         )
@@ -73,6 +82,8 @@ async def process_video(
             return ProcessResult(success=False, error="所有版本未通过质检")
 
         # Step 4: Editor
+        if cancel_event and cancel_event.is_set():
+            return ProcessResult(success=False, error="用户取消处理")
         output_files = await _run_editor(
             video_path, approved, sentences, config, cache, on_progress,
         )
@@ -128,6 +139,7 @@ async def _run_asr(
 
     cache.save(video_path, "asr", [s.model_dump() for s in sentences])
     logger.info("ASR complete: %d sentences", len(sentences))
+    _report_progress(on_progress, "语音识别完成", 30)
     return sentences
 
 
@@ -152,6 +164,7 @@ async def _run_director(
         sentences, config, version_count=config.max_versions,
     )
 
+    _report_progress(on_progress, "脚本生成完成，解析中...", 50)
     cache.save(video_path, "director", [v.model_dump() for v in versions])
     logger.info("Director complete: %d versions", len(versions))
     return versions
@@ -177,6 +190,7 @@ async def _run_inspector(
 
     approved = await review_versions(versions, sentences, config)
 
+    _report_progress(on_progress, "质检完成", 65)
     cache.save(video_path, "inspector", [v.model_dump() for v in approved])
     logger.info("Inspector complete: %d approved", len(approved))
     return approved
@@ -197,6 +211,7 @@ async def _run_editor(
 
     output_files = await cut_versions(video_path, approved, sentences, config)
     logger.info("Editor complete: %d output files", len(output_files))
+    _report_progress(on_progress, f"剪辑完成，{len(output_files)} 个文件", 95)
     return output_files
 
 
@@ -222,6 +237,7 @@ async def process_batch(
     cache: CacheManager | None = None,
     hotwords: str = "",
     max_parallel: int | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> list[ProcessResult]:
     """Process multiple videos with controlled concurrency.
 
@@ -233,6 +249,7 @@ async def process_batch(
         hotwords: Hotwords for ASR.
         max_parallel: Max concurrent video jobs. If None, auto-detected
             from hardware encoder capabilities.
+        cancel_event: Optional threading.Event to signal cancellation.
 
     Returns:
         List of ProcessResult in the same order as video_paths.
@@ -249,6 +266,9 @@ async def process_batch(
 
     async def _process_one(index: int, vpath: Path) -> ProcessResult:
         async with semaphore:
+            if cancel_event and cancel_event.is_set():
+                return ProcessResult(success=False, error="用户取消处理")
+
             video_name = vpath.name
 
             def per_video_progress(label: str, percent: int) -> None:
@@ -261,6 +281,7 @@ async def process_batch(
                 on_progress=per_video_progress,
                 cache=cache,
                 hotwords=hotwords,
+                cancel_event=cancel_event,
             )
 
     tasks = [_process_one(i, p) for i, p in enumerate(video_paths)]

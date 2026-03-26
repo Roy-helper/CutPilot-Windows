@@ -57,6 +57,7 @@ class PythonBridge:
     def __init__(self) -> None:
         self._window: webview.Window | None = None
         self._processing = False
+        self._cancel_event = threading.Event()
 
     def set_window(self, window: webview.Window) -> None:
         self._window = window
@@ -257,6 +258,7 @@ class PythonBridge:
             return {"success": False, "error": "请先在设置页配置 API Key"}
 
         self._processing = True
+        self._cancel_event.clear()
         try:
             from core.config import CutPilotConfig
             from core.cache_manager import CacheManager
@@ -287,6 +289,7 @@ class PythonBridge:
                 on_progress=on_progress,
                 cache=cache,
                 hotwords=hotwords,
+                cancel_event=self._cancel_event,
             ))
             elapsed = time.time() - start
 
@@ -316,6 +319,14 @@ class PythonBridge:
     def is_processing(self) -> bool:
         return self._processing
 
+    def cancel_processing(self) -> dict:
+        """Cancel the current processing task."""
+        if not self._processing:
+            return {"success": False, "error": "没有正在进行的任务"}
+        self._cancel_event.set()
+        logger.info("Processing cancellation requested")
+        return {"success": True}
+
     def process_batch(self, video_paths: list[str]) -> list[dict]:
         """Process multiple videos in parallel with auto-detected concurrency.
 
@@ -331,6 +342,7 @@ class PythonBridge:
             return [{"success": False, "error": "请先在设置页配置 API Key", "versions": [], "output_files": []}]
 
         self._processing = True
+        self._cancel_event.clear()
         try:
             from core.cache_manager import CacheManager
             from core.pipeline import process_batch
@@ -365,6 +377,7 @@ class PythonBridge:
                 cache=cache,
                 hotwords=hotwords,
                 max_parallel=max_par,
+                cancel_event=self._cancel_event,
             ))
             elapsed = time.time() - start
 
@@ -388,7 +401,8 @@ class PythonBridge:
             return result_dicts
         except Exception as e:
             logger.exception("Batch pipeline error")
-            return [{"success": False, "error": str(e), "versions": [], "output_files": []}]
+            error_result = {"success": False, "error": str(e), "versions": [], "output_files": []}
+            return [error_result for _ in video_paths]
         finally:
             self._processing = False
 
