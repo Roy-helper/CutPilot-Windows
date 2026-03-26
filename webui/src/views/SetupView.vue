@@ -12,6 +12,7 @@ const benchmarking = ref(true)
 // ASR state
 const asrCached = ref(false)
 const asrEngine = ref<'whisper' | 'funasr'>('whisper')
+const whisperAvailable = ref(false)
 const funasr_available = ref(false)
 const downloading = ref(false)
 const downloadResult = ref('')
@@ -31,15 +32,14 @@ onMounted(async () => {
   benchmarking.value = false
 
   // Check ASR
-  const asr = await checkAsrStatus()
+  const asr = await checkAsrStatus() as Record<string, any>
   asrCached.value = asr.models_cached
+  whisperAvailable.value = asr.whisper_available ?? false
+  funasr_available.value = asr.funasr_available ?? false
 
-  // Check if FunASR is installed (optional)
-  try {
-    funasr_available.value = asr.engine === 'funasr' || asr.installed
-  } catch {
-    funasr_available.value = false
-  }
+  // Default to whichever is available
+  if (whisperAvailable.value) asrEngine.value = 'whisper'
+  else if (funasr_available.value) asrEngine.value = 'funasr'
 })
 
 async function handleDownload() {
@@ -107,8 +107,9 @@ async function handleDownload() {
           </div>
 
           <div v-else class="space-y-3">
-            <!-- Whisper option -->
+            <!-- Whisper option (only if importable) -->
             <label
+              v-if="whisperAvailable"
               class="flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all"
               :class="asrEngine === 'whisper' ? 'border-primary bg-primary-fixed/10' : 'border-surface-container hover:border-outline-variant'"
             >
@@ -120,8 +121,9 @@ async function handleDownload() {
               <span class="text-xs text-outline whitespace-nowrap">461 MB</span>
             </label>
 
-            <!-- FunASR option -->
+            <!-- FunASR option (only if importable) -->
             <label
+              v-if="funasr_available"
               class="flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all"
               :class="asrEngine === 'funasr' ? 'border-primary bg-primary-fixed/10' : 'border-surface-container hover:border-outline-variant'"
             >
@@ -132,6 +134,12 @@ async function handleDownload() {
               </div>
               <span class="text-xs text-outline whitespace-nowrap">~2 GB</span>
             </label>
+
+            <!-- Neither available -->
+            <div v-if="!whisperAvailable && !funasr_available" class="p-4 rounded-xl bg-error-container/20 text-center">
+              <p class="text-sm text-error font-medium">语音识别引擎未安装</p>
+              <p class="text-xs text-on-surface-variant mt-1">请联系管理员检查安装包</p>
+            </div>
 
             <!-- Download button -->
             <button

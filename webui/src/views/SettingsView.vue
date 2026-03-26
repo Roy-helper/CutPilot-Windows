@@ -4,7 +4,8 @@ import TopBar from '@/components/TopBar.vue'
 import {
   getMachineId, getLicenseInfo, activateLicense, loadSettings, saveSettings as bridgeSave,
   getProviders as bridgeProviders, testConnection as bridgeTest,
-  selectDirectory, getEncoderInfo, getMaxParallel, type ProviderPreset,
+  selectDirectory, getEncoderInfo, getMaxParallel, checkAsrStatus, downloadAsrModel,
+  type ProviderPreset,
 } from '@/bridge'
 
 const provider = ref('deepseek')
@@ -48,6 +49,9 @@ const testResult = ref<string | null>(null)
 const saving = ref(false)
 const detectedEncoder = ref('自动检测中...')
 const detectedParallel = ref(0)
+const asrModelReady = ref(false)
+const asrDownloading = ref(false)
+const asrDownloadMsg = ref('')
 
 onMounted(async () => {
   // Load providers
@@ -77,6 +81,10 @@ onMounted(async () => {
   const enc = await getEncoderInfo()
   detectedEncoder.value = enc.is_hardware ? `${enc.name} (${enc.codec})` : `${enc.name}`
   detectedParallel.value = await getMaxParallel()
+
+  // Check ASR model
+  const asr = await checkAsrStatus()
+  asrModelReady.value = asr.models_cached
 })
 
 function copyMachineId() {
@@ -100,6 +108,15 @@ async function handleActivate() {
     activationCode.value = ''
   }
   activating.value = false
+}
+
+async function handleAsrDownload() {
+  asrDownloading.value = true
+  asrDownloadMsg.value = '正在下载语音模型...'
+  const res = await downloadAsrModel('whisper')
+  asrDownloadMsg.value = res.message
+  asrModelReady.value = res.success
+  asrDownloading.value = false
 }
 
 async function testConnection() {
@@ -198,6 +215,22 @@ async function browseOutputDir() {
             <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">语音识别</h3>
           </div>
           <div class="space-y-4">
+            <!-- ASR model status -->
+            <div class="flex justify-between items-center py-2 border-b border-outline-variant/10">
+              <span class="text-sm font-medium">语音模型</span>
+              <div class="flex items-center gap-2">
+                <span v-if="asrModelReady" class="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded uppercase">已就绪</span>
+                <span v-else class="px-2 py-0.5 bg-error-container text-on-error-container text-[10px] font-bold rounded uppercase">未安装</span>
+                <button
+                  v-if="!asrModelReady"
+                  class="text-xs font-bold text-primary hover:underline"
+                  :disabled="asrDownloading"
+                  @click="handleAsrDownload"
+                >{{ asrDownloading ? '下载中...' : '下载 (461MB)' }}</button>
+              </div>
+            </div>
+            <p v-if="asrDownloadMsg" class="text-xs" :class="asrModelReady ? 'text-green-600' : 'text-error'">{{ asrDownloadMsg }}</p>
+
             <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">专有热词输入 (Hotwords)</label>
             <textarea
               v-model="hotwords"

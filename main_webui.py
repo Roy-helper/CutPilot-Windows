@@ -16,6 +16,16 @@ import webview
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Fix SSL certificates for PyInstaller on macOS
+# Without this, urllib/requests fails with CERTIFICATE_VERIFY_FAILED
+try:
+    import certifi
+    import os
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+except ImportError:
+    pass
+
 _DIST_DIR = Path(__file__).parent / "webui" / "dist"
 
 # Background event loop for async pipeline calls
@@ -80,9 +90,26 @@ class PythonBridge:
         """Check if ASR model is installed and cached."""
         try:
             from core.asr import check_asr_available
-            return check_asr_available()
+            result = check_asr_available()
+            # Also report which engines are actually importable
+            whisper_ok = False
+            funasr_ok = False
+            try:
+                import whisper  # noqa: F401
+                whisper_ok = True
+            except ImportError:
+                pass
+            try:
+                import funasr  # noqa: F401
+                funasr_ok = True
+            except ImportError:
+                pass
+            result["whisper_available"] = whisper_ok
+            result["funasr_available"] = funasr_ok
+            return result
         except Exception as e:
-            return {"installed": False, "models_cached": False, "engine": "none", "message": str(e)}
+            return {"installed": False, "models_cached": False, "engine": "none",
+                    "message": str(e), "whisper_available": False, "funasr_available": False}
 
     def download_asr_model(self, engine: str = "whisper") -> dict:
         """Download ASR model. engine: 'whisper' or 'funasr'."""
