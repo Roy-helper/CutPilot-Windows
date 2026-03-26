@@ -96,6 +96,31 @@ declare global {
 export const isNative = (): boolean => !!window.pywebview?.api
 
 /**
+ * Wait for pywebview API to be injected (max 5s), then return it.
+ * Returns null if timeout (dev mode).
+ */
+let _apiReady: Promise<PyWebViewAPI | null> | null = null
+
+export function waitForApi(): Promise<PyWebViewAPI | null> {
+  if (_apiReady) return _apiReady
+  _apiReady = new Promise((resolve) => {
+    if (window.pywebview?.api) {
+      resolve(window.pywebview.api)
+      return
+    }
+    const onReady = () => {
+      resolve(window.pywebview?.api ?? null)
+    }
+    window.addEventListener('pywebviewready', onReady, { once: true })
+    // Timeout: if pywebview never injects, we're in dev mode
+    globalThis.setTimeout(() => {
+      resolve(window.pywebview?.api ?? null)
+    }, 5000)
+  })
+  return _apiReady
+}
+
+/**
  * Get the pywebview API, or null in dev mode.
  */
 function getApi(): PyWebViewAPI | null {
@@ -110,18 +135,18 @@ export async function ping(): Promise<string> {
 }
 
 export async function getMachineId(): Promise<string> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.get_machine_id() : 'DEV-0000-0000-0000'
 }
 
 export async function getLicenseInfo(): Promise<Record<string, unknown>> {
-  const api = getApi()
-  return api ? await api.get_license_info() : { is_valid: false, status_message: '开发模式', expiry: null }
+  const api = await waitForApi()
+  return api ? await api.get_license_info() : { is_valid: false, status_message: '开发模式', expiry: null, trial_remaining: 0 }
 }
 
 export async function activateLicense(code: string): Promise<{ success: boolean; message: string }> {
-  const api = getApi()
-  return api ? await api.activate_license(code) : { success: false, message: 'Dev mode' }
+  const api = await waitForApi()
+  return api ? await api.activate_license(code) : { success: false, message: '后端未连接' }
 }
 
 export async function loadSettings(): Promise<Record<string, unknown>> {
