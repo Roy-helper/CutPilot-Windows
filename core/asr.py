@@ -40,15 +40,16 @@ def check_asr_available() -> dict:
     # Check Whisper (primary engine, lightweight)
     try:
         import whisper  # noqa: F401
-        # Check if small model is cached
+        # Check if model is bundled or cached
+        bundled = _find_bundled_model()
         cache_dir = Path.home() / ".cache" / "whisper"
-        has_whisper_model = (cache_dir / "small.pt").exists() if cache_dir.exists() else False
-        if has_whisper_model:
+        has_model = bundled is not None or ((cache_dir / "small.pt").exists() if cache_dir.exists() else False)
+        if has_model:
             return {"installed": True, "models_cached": True, "engine": "whisper",
-                    "message": "语音识别就绪 (Whisper)"}
+                    "message": "语音识别就绪 (Whisper)" + (" [内置]" if bundled else "")}
         else:
             return {"installed": True, "models_cached": False, "engine": "whisper",
-                    "message": "首次使用需下载语音模型（约 461MB），处理时自动下载"}
+                    "message": "需下载语音模型（约 461MB）"}
     except ImportError:
         pass
 
@@ -207,10 +208,29 @@ _whisper_model = None
 _whisper_lock = threading.Lock()
 
 
+def _find_bundled_model() -> str | None:
+    """Find Whisper model bundled with PyInstaller, or in project models/ dir."""
+    import sys
+    candidates = [
+        # PyInstaller bundle: _MEIPASS/models/whisper/small.pt
+        Path(getattr(sys, '_MEIPASS', '')) / "models" / "whisper" / "small.pt",
+        # Development: project root models/
+        Path(__file__).parent.parent / "models" / "whisper" / "small.pt",
+    ]
+    for p in candidates:
+        if p.exists():
+            logger.info("Found bundled Whisper model: %s", p)
+            return str(p.parent)
+    return None
+
+
 def _get_whisper_model(model_name: str = "small"):
     """Lazy-load Whisper model (singleton, thread-safe).
 
-    First call downloads model (~461MB for 'small'). Subsequent calls use cache.
+    Priority:
+    1. Bundled model (in PyInstaller package or models/ dir)
+    2. Cached model (~/.cache/whisper/)
+    3. Download from internet (fallback)
     """
     global _whisper_model
     with _whisper_lock:
@@ -218,9 +238,17 @@ def _get_whisper_model(model_name: str = "small"):
             return _whisper_model
         try:
             import whisper
-            logger.info("加载 Whisper %s 模型（首次需下载约 461MB）...", model_name)
-            _whisper_model = whisper.load_model(model_name)
-            logger.info("Whisper %s 模型加载完成", model_name)
+
+            # Check for bundled model first (no network needed)
+            bundled_dir = _find_bundled_model()
+            if bundled_dir:
+                logger.info("使用内置 Whisper 模型...")
+                _whisper_model = whisper.load_model(model_name, download_root=bundled_dir)
+            else:
+                logger.info("加载 Whisper %s 模型...", model_name)
+                _whisper_model = whisper.load_model(model_name)
+
+            logger.info("Whisper 模型加载完成")
             return _whisper_model
         except Exception as exc:
             logger.warning("Whisper 加载失败: %s", exc)
