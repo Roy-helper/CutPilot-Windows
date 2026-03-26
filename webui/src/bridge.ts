@@ -143,7 +143,7 @@ function getApi(): PyWebViewAPI | null {
 // ── Bridge functions ───────────────────────────────────────
 
 export async function ping(): Promise<string> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.ping() : 'pong (dev)'
 }
 
@@ -173,7 +173,7 @@ export async function saveSettings(settings: Record<string, unknown>): Promise<{
 }
 
 export async function getProviders(): Promise<ProviderPreset[]> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.get_providers() : [
     { id: 'deepseek', name: 'DeepSeek', base_url: '', model: 'deepseek-chat', api_key_hint: 'sk-...' },
     { id: 'qwen', name: '通义千问', base_url: '', model: 'qwen-plus', api_key_hint: 'sk-...' },
@@ -181,34 +181,34 @@ export async function getProviders(): Promise<ProviderPreset[]> {
 }
 
 export async function selectFiles(): Promise<string[]> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.select_files() : []
 }
 
 export async function selectDirectory(): Promise<string> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.select_directory() : ''
 }
 
 export async function openFolder(path: string): Promise<{ success: boolean; error?: string }> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.open_folder(path) : { success: false, error: 'Dev mode' }
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.get_history() : []
 }
 
 export async function clearHistory(): Promise<{ success: boolean; error?: string }> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.clear_history() : { success: true }
 }
 
 export async function testConnection(
   provider: string, apiKey: string, baseUrl?: string, model?: string
 ): Promise<{ success: boolean; error?: string; model?: string }> {
-  const api = getApi()
+  const api = await waitForApi()
   return api
     ? await api.test_connection(provider, apiKey, baseUrl ?? '', model ?? '')
     : { success: true, model: 'dev-mock' }
@@ -217,14 +217,14 @@ export async function testConnection(
 export async function processVideo(
   videoPath: string, settingsOverride?: Record<string, unknown>
 ): Promise<ProcessResult> {
-  const api = getApi()
+  const api = await waitForApi()
   return api
     ? await api.process_video(videoPath, settingsOverride)
     : { success: false, error: 'Dev mode — no backend', versions: [], output_files: [] }
 }
 
 export async function processBatch(videoPaths: string[]): Promise<ProcessResult[]> {
-  const api = getApi()
+  const api = await waitForApi()
   return api
     ? await api.process_batch(videoPaths)
     : videoPaths.map(() => ({ success: false, error: 'Dev mode', versions: [], output_files: [] }))
@@ -243,7 +243,7 @@ export async function getMaxParallel(): Promise<number> {
 export async function exportVersions(
   videoPath: string, versionIds: number[], options?: Record<string, unknown>
 ): Promise<{ success: boolean; files?: unknown[]; error?: string }> {
-  const api = getApi()
+  const api = await waitForApi()
   return api
     ? await api.export_versions(videoPath, versionIds, options)
     : { success: false, error: 'Dev mode' }
