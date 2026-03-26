@@ -250,26 +250,36 @@ const fileStatusDot: Record<string, string> = {
             </div>
           </div>
 
-          <div class="p-4">
-            <p class="text-[10px] text-on-surface-variant truncate mb-2" :title="ver.videoPath">
-              <span class="material-symbols-outlined text-[10px] align-middle mr-0.5">video_file</span>
-              {{ ver.videoPath.split(/[/\\]/).pop() }}
-            </p>
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex gap-2">
-                <span v-for="tag in ver.tags" :key="tag" class="px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-bold rounded uppercase">{{ tag }}</span>
-              </div>
-              <div class="flex items-center gap-1">
+          <div class="p-4 space-y-3">
+            <!-- Source video + score -->
+            <div class="flex items-center justify-between">
+              <p class="text-[10px] text-on-surface-variant truncate flex-1 mr-2" :title="ver.videoPath">
+                <span class="material-symbols-outlined text-[10px] align-middle mr-0.5">video_file</span>
+                {{ ver.videoPath.split(/[/\\]/).pop() }}
+              </p>
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <span v-for="tag in ver.tags" :key="tag" class="px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-bold rounded">{{ tag }}</span>
                 <span class="material-symbols-outlined text-amber-500 text-xs" style="font-variation-settings: 'FILL' 1;">star</span>
                 <span class="text-xs font-bold">{{ ver.score }}</span>
               </div>
             </div>
-            <h3 class="text-sm font-bold mb-2 truncate">{{ ver.title }}</h3>
-            <p class="text-xs text-on-surface-variant line-clamp-2 mb-3 leading-relaxed">{{ ver.description }}</p>
-            <div class="flex flex-wrap gap-1.5 mb-4">
-              <span v-for="h in ver.hashtags" :key="h" class="text-[10px] text-on-surface-variant">{{ h }}</span>
+
+            <!-- Cover title (封面主标题) -->
+            <h3 class="text-sm font-bold leading-snug">{{ ver.title }}</h3>
+
+            <!-- Publish text (发布文案) -->
+            <div class="bg-surface-container-low rounded-lg p-3">
+              <p class="text-[10px] font-bold text-outline uppercase tracking-wider mb-1">发布文案</p>
+              <p class="text-xs text-on-surface leading-relaxed">{{ ver.description }}</p>
             </div>
-            <div class="pt-4 border-t border-surface-container flex items-center justify-end">
+
+            <!-- Tags (标签) -->
+            <div class="flex flex-wrap gap-1.5">
+              <span v-for="h in ver.hashtags" :key="h" class="px-2 py-0.5 bg-surface-container-high text-on-surface-variant text-[10px] font-medium rounded-full">{{ h }}</span>
+            </div>
+
+            <!-- Actions -->
+            <div class="pt-3 border-t border-surface-container flex items-center justify-end">
               <button class="text-primary hover:underline text-[10px] font-bold uppercase tracking-wider" @click="copyVersionText(ver)">复制文案</button>
             </div>
           </div>
