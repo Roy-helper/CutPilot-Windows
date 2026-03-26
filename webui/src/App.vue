@@ -53,7 +53,7 @@ onMounted(async () => {
   // Step 2: Check if setup needed (ASR model missing)
   try {
     const asr = await checkAsrStatus()
-    if (!asr.models_cached) {
+    if (!asr.ready) {
       state.value = 'setup'
       return
     }
@@ -78,7 +78,7 @@ function onActivated() {
   // After activation, check if setup needed
   state.value = 'setup'
   checkAsrStatus().then(asr => {
-    if (asr.models_cached) state.value = 'main'
+    if (asr.ready) state.value = 'main'
   }).catch(() => { state.value = 'main' })
 }
 

@@ -107,11 +107,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (isProcessing.value) return
     if (pendingFiles.value.length === 0) return
 
-    // Check ASR status before starting
+    // Check ASR model
     const asrStatus = await checkAsrStatus()
-    if (!asrStatus.installed) {
+    if (!asrStatus.ready) {
       const notify = useNotificationStore()
-      notify.add('error', '语音识别组件未安装', '请联系管理员')
+      notify.add('error', '语音模型未下载', '请先在设置页或环境配置页下载语音模型')
       return
     }
 
@@ -124,14 +124,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       file.icon = 'video_library'
     }
 
-    if (!asrStatus.models_cached) {
-      const notify = useNotificationStore()
-      notify.add('info', '首次使用需下载语音模型', '约 461MB，处理时自动下载，请耐心等待')
-    }
-
-    progressText.value = asrStatus.models_cached
-      ? `正在处理 0/${pending.length} 个视频...`
-      : `首次下载语音模型中（约 461MB），请耐心等待...`
+    progressText.value = `正在处理 0/${pending.length} 个视频...`
     progress.value = 5
 
     try {

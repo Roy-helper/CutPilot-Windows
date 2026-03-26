@@ -87,52 +87,18 @@ class PythonBridge:
     # ── ASR Status ───────────────────────────────────────────
 
     def check_asr_status(self) -> dict:
-        """Check if ASR model is installed and cached."""
+        """Check if ASR model is downloaded and ready."""
         try:
-            from core.asr import check_asr_available
-            result = check_asr_available()
-            # Also report which engines are actually importable
-            whisper_ok = False
-            funasr_ok = False
-            try:
-                import whisper  # noqa: F401
-                whisper_ok = True
-            except ImportError:
-                pass
-            try:
-                import funasr  # noqa: F401
-                funasr_ok = True
-            except ImportError:
-                pass
-            result["whisper_available"] = whisper_ok
-            result["funasr_available"] = funasr_ok
-            return result
+            from core.asr import get_model_status
+            return get_model_status()
         except Exception as e:
-            return {"installed": False, "models_cached": False, "engine": "none",
-                    "message": str(e), "whisper_available": False, "funasr_available": False}
+            return {"ready": False, "message": str(e)}
 
-    def download_asr_model(self, engine: str = "whisper") -> dict:
-        """Download ASR model. engine: 'whisper' or 'funasr'."""
+    def download_asr_model(self) -> dict:
+        """Download faster-whisper model (~500MB)."""
         try:
-            if engine == "funasr":
-                logger.info("开始下载 FunASR 模型（约 2GB）...")
-                from funasr import AutoModel
-                AutoModel(
-                    model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-                    vad_model="fsmn-vad",
-                    punc_model="ct-punc",
-                    spk_model="cam++",
-                    device="cpu",
-                    disable_update=False,
-                )
-                return {"success": True, "message": "FunASR 模型下载完成"}
-            else:
-                logger.info("开始下载 Whisper small 模型（约 461MB）...")
-                import whisper
-                whisper.load_model("small")
-                return {"success": True, "message": "Whisper 模型下载完成"}
-        except ImportError as e:
-            return {"success": False, "message": f"引擎未安装: {e}"}
+            from core.asr import download_model
+            return download_model()
         except Exception as e:
             logger.exception("模型下载失败")
             return {"success": False, "message": f"下载失败: {e}"}

@@ -24,8 +24,8 @@ interface PyWebViewAPI {
   export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
   get_encoder_info(): Promise<EncoderInfo>
   get_max_parallel(): Promise<number>
-  check_asr_status(): Promise<{ installed: boolean; models_cached: boolean; engine: string; message: string }>
-  download_asr_model(engine: string): Promise<{ success: boolean; message: string }>
+  check_asr_status(): Promise<{ ready: boolean; message: string }>
+  download_asr_model(): Promise<{ success: boolean; message: string }>
   run_benchmark(): Promise<BenchmarkResult>
   preview_video(filePath: string): Promise<{ success: boolean; error?: string }>
   get_output_files(videoPath: string): Promise<OutputFile[]>
@@ -253,14 +253,14 @@ export async function exportVersions(
     : { success: false, error: 'Dev mode' }
 }
 
-export async function checkAsrStatus(): Promise<{ installed: boolean; models_cached: boolean; engine: string; message: string }> {
+export async function checkAsrStatus(): Promise<{ ready: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.check_asr_status() : { installed: false, models_cached: false, engine: 'none', message: '后端未连接' }
+  return api ? await api.check_asr_status() : { ready: false, message: '后端未连接' }
 }
 
-export async function downloadAsrModel(engine: string = 'whisper'): Promise<{ success: boolean; message: string }> {
+export async function downloadAsrModel(): Promise<{ success: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.download_asr_model(engine) : { success: false, message: '后端未连接' }
+  return api ? await api.download_asr_model() : { success: false, message: '后端未连接' }
 }
 
 export async function runBenchmark(): Promise<BenchmarkResult> {

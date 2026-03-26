@@ -84,7 +84,7 @@ onMounted(async () => {
 
   // Check ASR model
   const asr = await checkAsrStatus()
-  asrModelReady.value = asr.models_cached
+  asrModelReady.value = asr.ready
 })
 
 function copyMachineId() {
@@ -113,7 +113,7 @@ async function handleActivate() {
 async function handleAsrDownload() {
   asrDownloading.value = true
   asrDownloadMsg.value = '正在下载语音模型...'
-  const res = await downloadAsrModel('whisper')
+  const res = await downloadAsrModel()
   asrDownloadMsg.value = res.message
   asrModelReady.value = res.success
   asrDownloading.value = false
