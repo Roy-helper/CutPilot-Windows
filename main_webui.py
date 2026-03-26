@@ -572,7 +572,13 @@ def main():
             pass
 
     window.events.loaded += on_loaded
-    webview.start(debug=("--debug" in sys.argv))
+
+    # Use EdgeChromium (WebView2) on Windows — avoids pythonnet/.NET dependency issues.
+    # WebView2 runtime is pre-installed on Windows 10 1803+ and all Windows 11.
+    gui = None
+    if sys.platform == "win32":
+        gui = "edgechromium"
+    webview.start(debug=("--debug" in sys.argv), gui=gui)
 
 
 if __name__ == "__main__":
