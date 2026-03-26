@@ -77,7 +77,19 @@ class PythonBridge:
             from core.asr import check_asr_available
             return check_asr_available()
         except Exception as e:
-            return {"installed": False, "models_cached": False, "message": str(e)}
+            return {"installed": False, "models_cached": False, "engine": "none", "message": str(e)}
+
+    def download_asr_model(self) -> dict:
+        """Download Whisper model to local cache. Blocking call (~461MB)."""
+        try:
+            import whisper
+            logger.info("开始下载 Whisper small 模型...")
+            whisper.load_model("small")
+            logger.info("Whisper 模型下载完成")
+            return {"success": True, "message": "语音模型下载完成"}
+        except Exception as e:
+            logger.exception("模型下载失败")
+            return {"success": False, "message": f"下载失败: {e}"}
 
     # ── License ─────────────────────────────────────────────
 
