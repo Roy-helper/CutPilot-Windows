@@ -24,6 +24,7 @@ interface PyWebViewAPI {
   export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
   get_encoder_info(): Promise<EncoderInfo>
   get_max_parallel(): Promise<number>
+  check_asr_status(): Promise<{ installed: boolean; models_cached: boolean; message: string }>
   preview_video(filePath: string): Promise<{ success: boolean; error?: string }>
   get_output_files(videoPath: string): Promise<OutputFile[]>
   delete_history_entry(timestamp: string): Promise<{ success: boolean; error?: string }>
@@ -239,6 +240,11 @@ export async function exportVersions(
   return api
     ? await api.export_versions(videoPath, versionIds, options)
     : { success: false, error: 'Dev mode' }
+}
+
+export async function checkAsrStatus(): Promise<{ installed: boolean; models_cached: boolean; message: string }> {
+  const api = await waitForApi()
+  return api ? await api.check_asr_status() : { installed: false, models_cached: false, message: '后端未连接' }
 }
 
 export async function previewVideo(filePath: string): Promise<{ success: boolean; error?: string }> {

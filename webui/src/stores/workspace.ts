@@ -7,7 +7,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
   selectFiles, processBatch, exportVersions, getEncoderInfo, getMaxParallel,
-  previewVideo, openFolder,
+  previewVideo, openFolder, checkAsrStatus,
   type ProcessResult, type EncoderInfo,
 } from '@/bridge'
 import { useNotificationStore } from './notifications'
@@ -106,6 +106,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (isProcessing.value) return
     if (pendingFiles.value.length === 0) return
 
+    // Check ASR status before starting
+    const asrStatus = await checkAsrStatus()
+    if (!asrStatus.installed) {
+      const notify = useNotificationStore()
+      notify.add('error', '语音识别组件未安装', '请联系管理员安装 funasr 和 torch')
+      return
+    }
+    if (!asrStatus.models_cached) {
+      const notify = useNotificationStore()
+      notify.add('info', '首次使用需下载语音模型', '约 1GB，下载完成后可离线使用。处理第一个视频时会自动下载，请耐心等待。')
+    }
+
     isProcessing.value = true
     const pending = pendingFiles.value
 
@@ -115,7 +127,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       file.icon = 'video_library'
     }
 
-    progressText.value = `正在处理 0/${pending.length} 个视频...`
+    progressText.value = asrStatus.models_cached
+      ? `正在处理 0/${pending.length} 个视频...`
+      : `首次下载语音模型中（约 1GB），请耐心等待...`
     progress.value = 5
 
     try {

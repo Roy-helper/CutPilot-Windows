@@ -31,8 +31,42 @@ class TranscriptSegment(BaseModel):
     speaker: str | None = None
 
 
+def check_asr_available() -> dict:
+    """Check if FunASR is installed and models are cached.
+
+    Returns:
+        {"installed": bool, "models_cached": bool, "message": str}
+    """
+    try:
+        import funasr  # noqa: F401
+        import torch  # noqa: F401
+        installed = True
+    except ImportError:
+        return {"installed": False, "models_cached": False,
+                "message": "语音识别组件未安装，需要安装 funasr 和 torch"}
+
+    # Check if model files are cached (ModelScope cache)
+    from pathlib import Path
+    cache_dir = Path.home() / ".cache" / "modelscope" / "hub"
+    # Check for paraformer model directory
+    has_model = any(cache_dir.glob("iic/speech_seaco_paraformer*")) if cache_dir.exists() else False
+    if not has_model:
+        # Also check for the simpler paraformer-zh
+        has_model = any(cache_dir.glob("iic/speech_paraformer*")) if cache_dir.exists() else False
+
+    if has_model:
+        return {"installed": True, "models_cached": True, "message": "语音识别就绪"}
+    else:
+        return {"installed": True, "models_cached": False,
+                "message": "语音模型需要首次下载（约 1GB），下载后可离线使用"}
+
+
 def _get_local_model():
-    """Lazy-load FunASR model (singleton, thread-safe). Returns None if unavailable."""
+    """Lazy-load FunASR model (singleton, thread-safe). Returns None if unavailable.
+
+    First run: allows model download from ModelScope (disable_update=False).
+    Subsequent runs: uses cached model (disable_update=True).
+    """
     global _local_model, _model_load_attempted
     with _model_lock:
         if _model_load_attempted:
@@ -42,7 +76,14 @@ def _get_local_model():
             from funasr import AutoModel
             import torch
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info("Loading FunASR SeACo-Paraformer with speaker model (device=%s)...", device)
+
+            # Check if models are already cached
+            status = check_asr_available()
+            disable_update = status["models_cached"]
+            if not disable_update:
+                logger.info("首次运行，正在下载语音识别模型（约 1GB）...")
+
+            logger.info("Loading FunASR (device=%s, cached=%s)...", device, disable_update)
             try:
                 _local_model = AutoModel(
                     model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
@@ -50,24 +91,21 @@ def _get_local_model():
                     punc_model="ct-punc",
                     spk_model="cam++",
                     device=device,
-                    disable_update=True,
+                    disable_update=disable_update,
                 )
-                logger.info("FunASR SeACo-Paraformer with speaker model loaded successfully")
+                logger.info("FunASR SeACo-Paraformer loaded successfully")
             except Exception as spk_exc:
-                logger.warning(
-                    "SeACo-Paraformer with speaker model failed, falling back to paraformer-zh: %s",
-                    spk_exc,
-                )
+                logger.warning("SeACo-Paraformer failed, trying paraformer-zh: %s", spk_exc)
                 _local_model = AutoModel(
                     model="paraformer-zh",
                     vad_model="fsmn-vad",
                     punc_model="ct-punc",
                     device=device,
-                    disable_update=True,
+                    disable_update=disable_update,
                 )
-                logger.info("FunASR paraformer-zh fallback loaded successfully")
+                logger.info("FunASR paraformer-zh loaded successfully")
         except Exception as exc:
-            logger.warning("FunASR local model unavailable: %s", exc)
+            logger.warning("FunASR unavailable: %s", exc)
             _local_model = None
         return _local_model
 

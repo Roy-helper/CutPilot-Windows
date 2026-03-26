@@ -69,6 +69,16 @@ class PythonBridge:
         from core.hwaccel import get_max_parallel
         return get_max_parallel()
 
+    # ── ASR Status ───────────────────────────────────────────
+
+    def check_asr_status(self) -> dict:
+        """Check if ASR model is installed and cached."""
+        try:
+            from core.asr import check_asr_available
+            return check_asr_available()
+        except Exception as e:
+            return {"installed": False, "models_cached": False, "message": str(e)}
+
     # ── License ─────────────────────────────────────────────
 
     def get_machine_id(self) -> str:
