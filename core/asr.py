@@ -42,11 +42,16 @@ def check_asr_available() -> dict:
               "message": "", "whisper_available": False, "funasr_available": False,
               "cloud_available": False}
 
-    # Check cloud API (DashScope) — just needs API key
+    # Check cloud API (DashScope) — needs API key (built-in or user)
     try:
-        from core.user_settings import load_user_settings
-        settings = load_user_settings()
-        has_key = bool(settings.get("api_key", ""))
+        has_key = False
+        try:
+            from core.builtin_keys import DASHSCOPE_API_KEY
+            has_key = bool(DASHSCOPE_API_KEY)
+        except ImportError:
+            from core.user_settings import load_user_settings
+            settings = load_user_settings()
+            has_key = bool(settings.get("api_key", ""))
         try:
             import dashscope  # noqa: F401
             result["cloud_available"] = has_key
@@ -54,7 +59,7 @@ def check_asr_available() -> dict:
                 result["installed"] = True
                 result["models_cached"] = True
                 result["engine"] = "cloud"
-                result["message"] = "语音识别就绪 (云端 API)"
+                result["message"] = "语音识别就绪 (云端)"
         except ImportError:
             pass
     except Exception:
@@ -417,9 +422,17 @@ async def transcribe_video(
 
     # Priority 1: DashScope cloud API (no local model needed)
     try:
-        from core.user_settings import load_user_settings
-        settings = load_user_settings()
-        api_key = settings.get("api_key", "")
+        # Get DashScope key: built-in → user settings
+        api_key = ""
+        try:
+            from core.builtin_keys import DASHSCOPE_API_KEY
+            api_key = DASHSCOPE_API_KEY
+        except ImportError:
+            pass
+        if not api_key:
+            from core.user_settings import load_user_settings
+            settings = load_user_settings()
+            api_key = settings.get("api_key", "")
         if api_key:
             import asyncio
             import subprocess

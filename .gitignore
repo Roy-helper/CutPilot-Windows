@@ -14,3 +14,4 @@ assets/ffmpeg/
 *.wav
 *.asr.json
 models/
+core/builtin_keys.py

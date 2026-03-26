@@ -75,12 +75,21 @@ def save_user_settings(settings: dict[str, Any]) -> None:
 def build_config_from_settings() -> CutPilotConfig:
     """Build a CutPilotConfig using user settings as overrides.
 
-    Priority: user_settings.json > .env > defaults.
-
-    When provider is not "custom", base_url and model are resolved
-    from the provider preset, ignoring any stored base_url / model.
+    Priority: user_settings.json > built-in keys > .env > defaults.
     """
     settings = load_user_settings()
+
+    # Apply built-in keys if user hasn't configured their own
+    if not settings.get("api_key"):
+        try:
+            from core.builtin_keys import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+            settings["api_key"] = DEEPSEEK_API_KEY
+            settings["base_url"] = DEEPSEEK_BASE_URL
+            settings["model"] = DEEPSEEK_MODEL
+            settings["provider"] = "deepseek"
+        except ImportError:
+            pass
+
     provider_id = settings.get("provider", "deepseek")
     preset = get_provider(provider_id)
 
