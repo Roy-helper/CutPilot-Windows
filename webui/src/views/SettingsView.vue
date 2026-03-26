@@ -56,37 +56,42 @@ const asrDownloading = ref(false)
 const asrDownloadMsg = ref('')
 
 onMounted(async () => {
-  // Load providers
-  const p = await bridgeProviders()
-  providers.value = p.map((pr: ProviderPreset) => ({ id: pr.id, name: pr.name }))
+  try {
+    const p = await bridgeProviders()
+    providers.value = p.map((pr: ProviderPreset) => ({ id: pr.id, name: pr.name }))
+  } catch { /* dev mode */ }
 
-  // Load license
-  machineId.value = await getMachineId()
-  await refreshLicense()
+  try {
+    machineId.value = await getMachineId()
+    await refreshLicense()
+  } catch { /* dev mode */ }
 
-  // Load saved settings
-  const s = await loadSettings()
-  if (s.provider) provider.value = s.provider as string
-  if (s.api_key) apiKey.value = s.api_key as string
-  if (s.max_versions) maxVersions.value = s.max_versions as number
-  if (s.min_sentences) minSentences.value = s.min_sentences as number
-  if (s.video_quality) quality.value = qualityFromBackend[s.video_quality as string] ?? '1080P'
-  if (s.hotwords) hotwords.value = s.hotwords as string
-  if (s.output_dir) outputDir.value = s.output_dir as string
-  if (s.hook_text) hookText.value = s.hook_text as string
-  if (s.generate_fast != null) generateFast.value = s.generate_fast as boolean
-  if (s.enable_hook_overlay != null) enableHook.value = s.enable_hook_overlay as boolean
-  if (s.enable_speaker_diarization != null) enableDiarization.value = s.enable_speaker_diarization as boolean
-  if (s.hook_duration != null) hookDuration.value = s.hook_duration as number
+  try {
+    const s = await loadSettings()
+    if (s.provider) provider.value = s.provider as string
+    if (s.api_key) apiKey.value = s.api_key as string
+    if (s.max_versions) maxVersions.value = s.max_versions as number
+    if (s.min_sentences) minSentences.value = s.min_sentences as number
+    if (s.video_quality) quality.value = qualityFromBackend[s.video_quality as string] ?? '1080P'
+    if (s.hotwords) hotwords.value = s.hotwords as string
+    if (s.output_dir) outputDir.value = s.output_dir as string
+    if (s.hook_text) hookText.value = s.hook_text as string
+    if (s.generate_fast != null) generateFast.value = s.generate_fast as boolean
+    if (s.enable_hook_overlay != null) enableHook.value = s.enable_hook_overlay as boolean
+    if (s.enable_speaker_diarization != null) enableDiarization.value = s.enable_speaker_diarization as boolean
+    if (s.hook_duration != null) hookDuration.value = s.hook_duration as number
+  } catch { /* dev mode */ }
 
-  // Detect encoder
-  const enc = await getEncoderInfo()
-  detectedEncoder.value = enc.is_hardware ? `${enc.name} (${enc.codec})` : `${enc.name}`
-  detectedParallel.value = await getMaxParallel()
+  try {
+    const enc = await getEncoderInfo()
+    detectedEncoder.value = enc.is_hardware ? `${enc.name} (${enc.codec})` : `${enc.name}`
+    detectedParallel.value = await getMaxParallel()
+  } catch { /* dev mode */ }
 
-  // Check ASR model
-  const asr = await checkAsrStatus()
-  asrModelReady.value = asr.ready
+  try {
+    const asr = await checkAsrStatus()
+    asrModelReady.value = asr.ready
+  } catch { /* dev mode */ }
 })
 
 function copyMachineId() {
@@ -159,6 +164,23 @@ async function saveAllSettings() {
   }
   saving.value = false
   setTimeout(() => { saveMsg.value = null }, 3000)
+}
+
+function resetToDefaults() {
+  if (!globalThis.confirm('确定要恢复所有设置为默认值吗？')) return
+  provider.value = 'deepseek'
+  apiKey.value = ''
+  maxVersions.value = 3
+  minSentences.value = 5
+  quality.value = '1080P'
+  hookText.value = ''
+  generateFast.value = true
+  enableHook.value = false
+  enableDiarization.value = false
+  hookDuration.value = 3.0
+  hotwords.value = ''
+  outputDir.value = ''
+  saveAllSettings()
 }
 
 async function browseOutputDir() {
@@ -332,7 +354,7 @@ async function browseOutputDir() {
               <div class="flex gap-2">
                 <button class="flex-1 py-2 rounded bg-surface-container-highest text-sm font-bold hover:bg-surface-container-high" @click="minSentences = Math.max(1, minSentences - 1)">-</button>
                 <input v-model.number="minSentences" class="w-16 bg-transparent border-none text-center font-bold text-sm" type="text" />
-                <button class="flex-1 py-2 rounded bg-surface-container-highest text-sm font-bold hover:bg-surface-container-high" @click="minSentences++">+</button>
+                <button class="flex-1 py-2 rounded bg-surface-container-highest text-sm font-bold hover:bg-surface-container-high" @click="minSentences = Math.min(50, minSentences + 1)">+</button>
               </div>
             </div>
             <!-- 视频质量 segmented control -->
@@ -447,7 +469,7 @@ async function browseOutputDir() {
         <!-- Save -->
         <div class="flex justify-end items-center gap-4 pt-6">
           <span v-if="saveMsg" class="text-sm font-semibold transition-opacity" :class="saveMsgType === 'success' ? 'text-green-600' : 'text-error'">{{ saveMsg }}</span>
-          <button class="px-8 py-3 text-sm font-bold text-on-surface-variant hover:text-on-surface transition-colors">恢复默认</button>
+          <button class="px-8 py-3 text-sm font-bold text-on-surface-variant hover:text-on-surface transition-colors" @click="resetToDefaults">恢复默认</button>
           <button class="px-12 py-3 bg-primary text-white font-bold text-sm rounded-xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all" :class="{ 'opacity-50': saving }" @click="saveAllSettings">{{ saving ? '保存中...' : '保存全部更改' }}</button>
         </div>
       </div>

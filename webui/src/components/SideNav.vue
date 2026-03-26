@@ -1,12 +1,28 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { getLicenseInfo } from '@/bridge'
 
 const route = useRoute()
 const router = useRouter()
 const store = useWorkspaceStore()
 const showAccountMenu = ref(false)
+const licenseLabel = ref('加载中...')
+
+onMounted(async () => {
+  try {
+    const info = await getLicenseInfo() as Record<string, any>
+    if (info.is_valid) {
+      licenseLabel.value = '专业版已激活'
+    } else {
+      const trial = (info.trial_remaining as number) ?? 0
+      licenseLabel.value = trial > 0 ? `试用中 (剩 ${trial} 次)` : '未激活'
+    }
+  } catch {
+    licenseLabel.value = '离线模式'
+  }
+})
 
 const navItems = [
   { path: '/', label: '工作台', icon: 'edit_square' },
@@ -71,7 +87,7 @@ async function handleNewProject() {
           </div>
           <div class="overflow-hidden flex-1 text-left">
             <p class="text-xs font-bold text-white truncate">管理员账户</p>
-            <p class="text-[10px] text-slate-500">专业版已激活</p>
+            <p class="text-[10px] text-slate-500">{{ licenseLabel }}</p>
           </div>
           <span class="material-symbols-outlined text-slate-500 text-sm transition-transform" :class="{ 'rotate-180': showAccountMenu }">expand_more</span>
         </button>
@@ -87,23 +103,9 @@ async function handleNewProject() {
               class="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-white/5 transition-colors text-sm"
               @click="showAccountMenu = false"
             >
-              <span class="material-symbols-outlined text-sm">manage_accounts</span>
-              账户管理
+              <span class="material-symbols-outlined text-sm">settings</span>
+              账户与授权
             </router-link>
-            <router-link
-              to="/settings"
-              class="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-white/5 transition-colors text-sm"
-              @click="showAccountMenu = false"
-            >
-              <span class="material-symbols-outlined text-sm">card_membership</span>
-              订阅套餐
-            </router-link>
-            <div class="border-t border-white/5">
-              <button class="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-red-400 hover:bg-white/5 transition-colors text-sm w-full text-left">
-                <span class="material-symbols-outlined text-sm">logout</span>
-                退出登录
-              </button>
-            </div>
           </div>
         </Transition>
       </div>

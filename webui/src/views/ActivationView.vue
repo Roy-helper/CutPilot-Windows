@@ -29,12 +29,18 @@ async function handleActivate() {
   if (!code) return
   activating.value = true
   resultMsg.value = ''
-  const res = await activateLicense(code)
-  resultMsg.value = res.message
-  resultOk.value = res.success
-  activating.value = false
-  if (res.success) {
-    globalThis.setTimeout(() => emit('activated'), 800)
+  try {
+    const res = await activateLicense(code)
+    resultMsg.value = res.message
+    resultOk.value = res.success
+    if (res.success) {
+      globalThis.setTimeout(() => emit('activated'), 800)
+    }
+  } catch (e: any) {
+    resultMsg.value = e.message || '激活请求失败，请检查网络连接'
+    resultOk.value = false
+  } finally {
+    activating.value = false
   }
 }
 

@@ -31,7 +31,6 @@ export interface Version {
   tags: string[]
   hashtags: string[]
   selected: boolean
-  autoExport: boolean
   outputPath: string  // path to the generated video file
 }
 
@@ -41,6 +40,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const progress = ref(0)
   const progressText = ref('')
   const isProcessing = ref(false)
+  const isExporting = ref(false)
 
   const encoderName = ref('检测中...')
   const maxParallel = ref(2)
@@ -104,7 +104,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!videoExts.includes(ext)) continue
 
       const fullPath = (f as any).path
-      if (fullPath && fullPath !== f.name && fullPath.startsWith('/')) {
+      if (fullPath && fullPath !== f.name && (fullPath.startsWith('/') || /^[A-Z]:/i.test(fullPath))) {
         hasRealPaths = true
         if (!files.value.some(vf => vf.path === fullPath)) {
           files.value.push({
@@ -177,7 +177,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
               tags: [v.approach_tag],
               hashtags: v.tags.map(t => `#${t}`),
               selected: true,
-              autoExport: false,
               outputPath: outputMap.get(v.version_id) ?? '',
             })
           }
@@ -209,25 +208,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const selected = selectedVersions.value
     if (selected.length === 0) return
 
-    const groups = new Map<string, number[]>()
-    for (const v of selected) {
-      const ids = groups.get(v.videoPath) ?? []
-      ids.push(v.versionId)
-      groups.set(v.videoPath, ids)
-    }
-    let exportCount = 0
-    for (const [videoPath, versionIds] of groups) {
-      const res = await exportVersions(videoPath, versionIds)
-      if (res.success) exportCount += versionIds.length
-    }
+    isExporting.value = true
     const notify = useNotificationStore()
-    if (exportCount > 0) {
-      notify.add('success', '导出完成', `${exportCount} 个版本已导出`)
+    try {
+      const groups = new Map<string, number[]>()
+      for (const v of selected) {
+        const ids = groups.get(v.videoPath) ?? []
+        ids.push(v.versionId)
+        groups.set(v.videoPath, ids)
+      }
+      let exportCount = 0
+      let failCount = 0
+      for (const [videoPath, versionIds] of groups) {
+        const res = await exportVersions(videoPath, versionIds)
+        if (res.success) exportCount += versionIds.length
+        else failCount += versionIds.length
+      }
+      if (exportCount > 0) {
+        notify.add('success', '导出完成', `${exportCount} 个版本已导出`)
+      }
+      if (failCount > 0) {
+        notify.add('error', '部分导出失败', `${failCount} 个版本导出失败`)
+      }
+    } catch (e: any) {
+      notify.add('error', '导出异常', e.message || '未知错误')
+    } finally {
+      isExporting.value = false
     }
   }
 
   function clear() {
     if (isProcessing.value) return
+    if (files.value.length === 0 && versions.value.length === 0) return
+    if (!globalThis.confirm('确定要清空所有文件和版本吗？此操作不可撤销。')) return
     files.value = []
     versions.value = []
     progress.value = 0
@@ -253,13 +266,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const doneFile = files.value.find(f => f.status === 'done')
     if (doneFile?.result?.output_files?.[0]) {
       const firstPath = doneFile.result.output_files[0].path
-      const dir = firstPath.substring(0, firstPath.lastIndexOf('/'))
+      const lastSep = Math.max(firstPath.lastIndexOf('/'), firstPath.lastIndexOf('\\'))
+      const dir = lastSep > 0 ? firstPath.substring(0, lastSep) : firstPath
       await openFolder(dir)
     }
   }
 
   return {
-    files, versions, progress, progressText, isProcessing,
+    files, versions, progress, progressText, isProcessing, isExporting,
     encoderName, maxParallel,
     pendingFiles, selectedVersions, hasFiles, hasVersions,
     detectEncoder, importFiles, addDroppedFiles, generate,

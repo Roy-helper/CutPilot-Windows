@@ -16,6 +16,20 @@ type AppState = 'loading' | 'activation' | 'setup' | 'main'
 const state = ref<AppState>('loading')
 
 onMounted(async () => {
+  // Register license-warning listener early so it's not missed
+  window.addEventListener('license-warning', (evt: Event) => {
+    const detail = (evt as CustomEvent).detail
+    licenseBanner.value = detail.message
+    licenseBannerLevel.value = detail.level ?? 'info'
+    const notify = useNotificationStore()
+    notify.add(detail.level === 'error' ? 'error' : 'info', detail.message)
+  })
+
+  // Loading timeout — never stay on loading screen forever
+  const loadingTimeout = globalThis.setTimeout(() => {
+    if (state.value === 'loading') state.value = 'main'
+  }, 10000)
+
   // pywebview detection
   if (window.pywebview?.api) {
     devMode.value = false
@@ -31,6 +45,7 @@ onMounted(async () => {
     const trialLeft = (info.trial_remaining as number) ?? 0
 
     if (!isValid && trialLeft <= 0) {
+      globalThis.clearTimeout(loadingTimeout)
       state.value = 'activation'
       return
     }
@@ -54,6 +69,7 @@ onMounted(async () => {
   try {
     const asr = await checkAsrStatus()
     if (!asr.ready) {
+      globalThis.clearTimeout(loadingTimeout)
       state.value = 'setup'
       return
     }
@@ -61,17 +77,8 @@ onMounted(async () => {
     // Dev mode — skip setup
   }
 
-  // All good
+  globalThis.clearTimeout(loadingTimeout)
   state.value = 'main'
-
-  // Listen for license warnings
-  window.addEventListener('license-warning', (evt: Event) => {
-    const detail = (evt as CustomEvent).detail
-    licenseBanner.value = detail.message
-    licenseBannerLevel.value = detail.level ?? 'info'
-    const notify = useNotificationStore()
-    notify.add(detail.level === 'error' ? 'error' : 'info', detail.message)
-  })
 })
 
 function onActivated() {

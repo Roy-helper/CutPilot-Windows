@@ -162,12 +162,12 @@ export async function activateLicense(code: string): Promise<{ success: boolean;
 }
 
 export async function loadSettings(): Promise<Record<string, unknown>> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.load_settings() : {}
 }
 
 export async function saveSettings(settings: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.save_settings(settings) : { success: true }
 }
 
@@ -229,18 +229,13 @@ export async function processBatch(videoPaths: string[]): Promise<ProcessResult[
     : videoPaths.map(() => ({ success: false, error: 'Dev mode', versions: [], output_files: [] }))
 }
 
-export async function isProcessing(): Promise<boolean> {
-  const api = getApi()
-  return api ? await api.is_processing() : false
-}
-
 export async function getEncoderInfo(): Promise<EncoderInfo> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.get_encoder_info() : { codec: 'libx264', name: 'Software x264 (dev)', is_hardware: false, extra_params: [] }
 }
 
 export async function getMaxParallel(): Promise<number> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.get_max_parallel() : 2
 }
 
@@ -269,17 +264,12 @@ export async function runBenchmark(): Promise<BenchmarkResult> {
 }
 
 export async function previewVideo(filePath: string): Promise<{ success: boolean; error?: string }> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.preview_video(filePath) : { success: false, error: 'Dev mode' }
 }
 
-export async function getOutputFiles(videoPath: string): Promise<OutputFile[]> {
-  const api = getApi()
-  return api ? await api.get_output_files(videoPath) : []
-}
-
 export async function deleteHistoryEntry(timestamp: string): Promise<{ success: boolean; error?: string }> {
-  const api = getApi()
+  const api = await waitForApi()
   return api ? await api.delete_history_entry(timestamp) : { success: true }
 }
 

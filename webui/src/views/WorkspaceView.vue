@@ -92,9 +92,9 @@ const fileStatusDot: Record<string, string> = {
       >打开目录</button>
       <button
         class="px-4 py-2 bg-surface-container-high text-on-surface text-sm font-medium rounded-md hover:bg-surface-container-highest transition-all disabled:opacity-30"
-        :disabled="store.selectedVersions.length === 0"
+        :disabled="store.selectedVersions.length === 0 || store.isExporting"
         @click="store.exportSelected()"
-      >导出选中 {{ store.selectedVersions.length > 0 ? `(${store.selectedVersions.length})` : '' }}</button>
+      >{{ store.isExporting ? '导出中...' : `导出选中${store.selectedVersions.length > 0 ? ` (${store.selectedVersions.length})` : ''}` }}</button>
       <button
         class="px-6 py-2 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50"
         :class="store.isProcessing ? 'bg-outline animate-pulse' : 'bg-gradient-to-b from-primary to-primary-container'"
@@ -250,12 +250,7 @@ const fileStatusDot: Record<string, string> = {
             <div class="flex flex-wrap gap-1.5 mb-4">
               <span v-for="h in ver.hashtags" :key="h" class="text-[10px] text-on-surface-variant">{{ h }}</span>
             </div>
-            <div class="pt-4 border-t border-surface-container flex items-center justify-between">
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input v-model="ver.autoExport" class="sr-only peer" type="checkbox" />
-                <div class="w-8 h-4 bg-surface-container-high peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
-                <span class="ms-2 text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">自动导出</span>
-              </label>
+            <div class="pt-4 border-t border-surface-container flex items-center justify-end">
               <button class="text-primary hover:underline text-[10px] font-bold uppercase tracking-wider" @click="copyVersionText(ver)">复制文案</button>
             </div>
           </div>

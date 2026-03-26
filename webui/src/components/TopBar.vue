@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '@/stores/notifications'
 
@@ -25,9 +25,19 @@ function closeMenuDelayed() {
   globalThis.setTimeout(() => { showAccountMenu.value = false }, 150)
 }
 
+function onClickOutsideNotify(e: MouseEvent) {
+  const panel = document.querySelector('.notify-panel-root')
+  if (panel && !panel.contains(e.target as Node)) {
+    notify.showPanel = false
+  }
+}
+
 function onSearch(e: Event) {
   emit('update:modelValue', (e.target as HTMLInputElement).value)
 }
+
+onMounted(() => document.addEventListener('click', onClickOutsideNotify))
+onUnmounted(() => document.removeEventListener('click', onClickOutsideNotify))
 
 const notifyTypeColor: Record<string, string> = {
   success: 'text-green-600',
@@ -55,7 +65,7 @@ const notifyTypeColor: Record<string, string> = {
       <div class="h-6 w-px bg-outline-variant/30 mx-2"></div>
 
       <!-- Notifications -->
-      <div class="relative">
+      <div class="relative notify-panel-root">
         <button
           class="p-2 text-on-surface-variant hover:bg-surface-container-high rounded-full transition-colors relative"
           @click="notify.toggle()"
@@ -123,26 +133,11 @@ const notifyTypeColor: Record<string, string> = {
           >
             <div class="px-4 py-3 border-b border-surface-container">
               <p class="text-sm font-semibold text-on-surface">管理员账户</p>
-              <p class="text-xs text-on-surface-variant">admin@cutpilot.local</p>
             </div>
             <button class="flex items-center gap-3 px-4 py-3 text-on-surface hover:bg-surface-container-low transition-colors text-sm w-full text-left" @click="goToSettings">
-              <span class="material-symbols-outlined text-sm">manage_accounts</span>
-              账户设置
+              <span class="material-symbols-outlined text-sm">settings</span>
+              账户与授权
             </button>
-            <button class="flex items-center gap-3 px-4 py-3 text-on-surface hover:bg-surface-container-low transition-colors text-sm w-full text-left" @click="goToSettings">
-              <span class="material-symbols-outlined text-sm">card_membership</span>
-              订阅套餐
-            </button>
-            <button class="flex items-center gap-3 px-4 py-3 text-on-surface hover:bg-surface-container-low transition-colors text-sm w-full text-left" @click="goToSettings">
-              <span class="material-symbols-outlined text-sm">verified</span>
-              授权信息
-            </button>
-            <div class="border-t border-surface-container">
-              <button class="flex items-center gap-3 px-4 py-3 text-error hover:bg-error-container/20 transition-colors text-sm w-full text-left">
-                <span class="material-symbols-outlined text-sm">logout</span>
-                退出登录
-              </button>
-            </div>
           </div>
         </Transition>
       </div>

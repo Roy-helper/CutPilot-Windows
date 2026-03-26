@@ -78,9 +78,19 @@ async function refreshHistory() {
 }
 
 async function handleClearHistory() {
-  await bridgeClear()
-  records.value = []
-  notify.add('info', '历史记录已清空')
+  if (records.value.length === 0) return
+  if (!globalThis.confirm('确定要清空所有历史记录吗？此操作不可撤销。')) return
+  try {
+    const res = await bridgeClear()
+    if (res && res.error) {
+      notify.add('error', '清空失败', res.error)
+      return
+    }
+    records.value = []
+    notify.add('info', '历史记录已清空')
+  } catch (e: any) {
+    notify.add('error', '清空失败', e.message || '未知错误')
+  }
 }
 
 function handleOpen(row: HistoryRecord) {
@@ -88,9 +98,18 @@ function handleOpen(row: HistoryRecord) {
 }
 
 async function handleDelete(row: HistoryRecord) {
-  await deleteHistoryEntry(row.time)
-  records.value = records.value.filter(r => r !== row)
-  notify.add('info', '已删除', row.name)
+  if (!globalThis.confirm(`确定要删除「${row.name}」的记录吗？`)) return
+  try {
+    const res = await deleteHistoryEntry(row.time)
+    if (res && res.error) {
+      notify.add('error', '删除失败', res.error)
+      return
+    }
+    records.value = records.value.filter(r => r !== row)
+    notify.add('info', '已删除', row.name)
+  } catch (e: any) {
+    notify.add('error', '删除失败', e.message || '未知错误')
+  }
 }
 
 const statusClass: Record<string, string> = {
@@ -174,19 +193,6 @@ const filterLabel = computed(() => {
   return ''
 })
 
-// Row context menu
-const contextRow = ref<HistoryRecord | null>(null)
-const contextPos = ref({ x: 0, y: 0 })
-
-function showContextMenu(row: HistoryRecord, event: MouseEvent) {
-  event.preventDefault()
-  contextRow.value = row
-  contextPos.value = { x: event.clientX, y: event.clientY }
-}
-
-function hideContextMenu() {
-  contextRow.value = null
-}
 </script>
 
 <template>
@@ -198,7 +204,7 @@ function hideContextMenu() {
     </template>
   </TopBar>
 
-  <div class="max-w-[1280px] mx-auto p-8 space-y-8" @click="hideContextMenu">
+  <div class="max-w-[1280px] mx-auto p-8 space-y-8">
     <!-- Stats -->
     <section class="grid grid-cols-4 gap-6">
       <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 border-primary">

@@ -28,14 +28,25 @@ onMounted(async () => {
   modelReady.value = status.ready
 })
 
+const downloadFailed = ref(false)
+
 async function handleDownload() {
   downloading.value = true
+  downloadFailed.value = false
   downloadMsg.value = '正在下载语音模型（约 500MB），请耐心等待...'
-  const res = await downloadAsrModel()
-  downloadMsg.value = res.message
-  downloadOk.value = res.success
-  if (res.success) modelReady.value = true
-  downloading.value = false
+  try {
+    const res = await downloadAsrModel()
+    downloadMsg.value = res.message
+    downloadOk.value = res.success
+    downloadFailed.value = !res.success
+    if (res.success) modelReady.value = true
+  } catch (e: any) {
+    downloadMsg.value = e.message || '下载失败，请检查网络连接'
+    downloadOk.value = false
+    downloadFailed.value = true
+  } finally {
+    downloading.value = false
+  }
 }
 </script>
 
@@ -92,7 +103,7 @@ async function handleDownload() {
             </template>
             <template v-else>
               <span class="material-symbols-outlined text-sm align-middle mr-1">download</span>
-              下载语音模型 (500MB)
+              {{ downloadFailed ? '重试下载 (500MB)' : '下载语音模型 (500MB)' }}
             </template>
           </button>
 
