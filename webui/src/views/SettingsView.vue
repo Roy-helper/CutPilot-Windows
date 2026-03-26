@@ -15,7 +15,7 @@ const showApiKey = ref(false)
 
 const maxVersions = ref(3)
 const minSentences = ref(15)
-const quality = ref('1080P')
+const quality = ref('4K')
 const generateFast = ref(true)
 const enableHook = ref(false)
 const enableDiarization = ref(false)
@@ -202,7 +202,7 @@ function resetToDefaults() {
   apiKey.value = ''
   maxVersions.value = 3
   minSentences.value = 15
-  quality.value = '1080P'
+  quality.value = '4K'
   generateFast.value = true
   enableHook.value = false
   asrEngine.value = 'faster-whisper'

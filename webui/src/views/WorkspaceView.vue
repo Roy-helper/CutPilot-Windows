@@ -7,7 +7,6 @@ import { useNotificationStore } from '@/stores/notifications'
 
 const store = useWorkspaceStore()
 
-const isDragging = ref(false)
 const activeFilter = ref('all')
 const searchQuery = ref('')
 
@@ -29,12 +28,6 @@ const filteredVersions = computed(() => {
   }
   return list
 })
-
-function handleDrop(e: DragEvent) {
-  isDragging.value = false
-  const droppedFiles = e.dataTransfer?.files
-  if (droppedFiles) store.addDroppedFiles(droppedFiles)
-}
 
 // Listen for progress + import events
 let removeProgressListener: (() => void) | null = null

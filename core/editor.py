@@ -16,7 +16,7 @@ from typing import Any
 from moviepy import VideoFileClip, concatenate_videoclips
 from pydantic import BaseModel
 
-from core.config import CutPilotConfig, QUALITY_PRESETS
+from core.config import CutPilotConfig
 from core.hwaccel import get_encoder_info, get_ffmpeg_params
 from core.models import ExportOptions, Sentence, ScriptVersion
 from core.overlay import burn_hook_overlay
@@ -359,15 +359,3 @@ def _find_stream(
     return None
 
 
-def _with_suffix(base_path: str, tag: str) -> str:
-    """Create a sibling path with *tag* inserted before the extension."""
-    p = Path(base_path)
-    return str(p.with_name(f"{p.stem}{tag}{p.suffix}"))
-
-
-def _escape_filtergraph_path(path: str) -> str:
-    """Escape a file path for use inside an ffmpeg filtergraph expression."""
-    result = path
-    for ch in ("\\", "'", ":", ";", "[", "]"):
-        result = result.replace(ch, f"\\{ch}")
-    return result

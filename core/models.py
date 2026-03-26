@@ -24,7 +24,6 @@ class Sentence(BaseModel):
     end_sec: float
     text: str
     speaker_id: str | None = None
-    confidence: float | None = None
 
 
 class ScriptVersion(BaseModel):
@@ -36,8 +35,6 @@ class ScriptVersion(BaseModel):
     title: str = ""
     structure: str = ""
     sentence_ids: list[int] = Field(default_factory=list)
-    hook_text: str = ""
-    why_it_may_work: str = ""
     reason: str = ""
     estimated_duration: float = 0.0
     score: float = 0.0
@@ -83,13 +80,3 @@ class ExportOptions(BaseModel):
     video_quality: str = "standard"  # draft / standard / high
 
 
-class PipelineState(BaseModel):
-    """Tracks pipeline progress for cache/resume."""
-
-    model_config = {"frozen": True}
-
-    video_path: str
-    asr_done: bool = False
-    director_done: bool = False
-    inspector_done: bool = False
-    editor_done: bool = False

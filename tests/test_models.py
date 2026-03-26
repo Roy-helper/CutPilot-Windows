@@ -4,7 +4,6 @@ from pydantic import ValidationError
 
 from core.models import (
     APPROACH_TAGS,
-    PipelineState,
     ProcessResult,
     ScriptVersion,
     Sentence,
@@ -23,7 +22,6 @@ class TestSentence:
     def test_default_optional_fields(self):
         s = Sentence(id=1, start_sec=0.0, end_sec=1.0, text="x")
         assert s.speaker_id is None
-        assert s.confidence is None
 
     def test_frozen_raises_on_mutation(self):
         s = Sentence(id=1, start_sec=0.0, end_sec=1.0, text="x")
@@ -76,20 +74,3 @@ class TestProcessResult:
         r = ProcessResult(success=True)
         with pytest.raises(ValidationError):
             r.success = False
-
-
-# -- PipelineState -----------------------------------------------------------
-
-
-class TestPipelineState:
-    def test_defaults(self):
-        p = PipelineState(video_path="/tmp/test.mp4")
-        assert p.asr_done is False
-        assert p.director_done is False
-        assert p.inspector_done is False
-        assert p.editor_done is False
-
-    def test_frozen_raises_on_mutation(self):
-        p = PipelineState(video_path="/tmp/test.mp4")
-        with pytest.raises(ValidationError):
-            p.asr_done = True

@@ -40,7 +40,7 @@ class CutPilotConfig(BaseSettings):
     # - draft: fast encode, lower quality (CRF 28, ultrafast) — for preview
     # - standard: balanced (CRF 23, medium) — default for most users
     # - high: best quality (CRF 18, slow) — for final delivery
-    video_quality: Literal["draft", "standard", "high"] = "standard"
+    video_quality: Literal["draft", "standard", "high"] = "high"
 
     # Output
     output_dir: str = ""

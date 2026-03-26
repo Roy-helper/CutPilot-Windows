@@ -30,7 +30,7 @@ _DEFAULTS: dict[str, Any] = {
     "hook_duration": 3.0,
     "asr_engine": "faster-whisper",
     "enable_speaker_diarization": False,
-    "video_quality": "standard",
+    "video_quality": "high",
     "output_dir": "",
     "hotwords": "",
 }

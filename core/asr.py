@@ -1,7 +1,6 @@
 """FunASR integration for speech-to-text transcription.
 
 CutPilot: Direct local model call, auto-detects GPU/CPU.
-Falls back to HTTP API if local model unavailable.
 """
 from __future__ import annotations
 
@@ -428,7 +427,6 @@ def _transcribe_faster_whisper(video_path: str) -> list[TranscriptSegment]:
 
 async def transcribe_video(
     video_path: str,
-    funasr_url: str = "http://localhost:10095",
     hotwords: str = "",
     enable_diarization: bool = True,
     engine: str = "faster-whisper",
@@ -479,47 +477,3 @@ async def transcribe_video(
             logger.info("FunASR fallback 也不可用: %s", exc)
 
     raise RuntimeError("语音模型未下载，请在设置页点击「下载语音模型」")
-
-
-async def _transcribe_http(
-    video_path: str,
-    funasr_url: str,
-) -> list[TranscriptSegment]:
-    """Fallback: extract audio → send to FunASR HTTP API."""
-    import asyncio
-    import tempfile
-    import httpx
-
-    # Extract audio
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        audio_path = tmp.name
-
-    process = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-y", "-i", video_path,
-        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-        audio_path,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await process.communicate()
-    if process.returncode != 0:
-        error_msg = stderr.decode().strip() if stderr else "Unknown error"
-        raise RuntimeError(f"ffmpeg audio extraction failed: {error_msg}")
-
-    try:
-        api_url = f"{funasr_url}/api/asr"
-        timeout = httpx.Timeout(120.0, connect=10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            with open(audio_path, "rb") as f:
-                response = await client.post(api_url, files={"file": ("audio.wav", f, "audio/wav")})
-
-        if response.status_code != 200:
-            raise RuntimeError(f"语音识别服务连接失败 (HTTP {response.status_code})，请确认 FunASR 服务已启动: {funasr_url}")
-        data = response.json()
-        segments = data.get("segments", [])
-        return [
-            TranscriptSegment(start=s["start"], end=s["end"], text=s["text"])
-            for s in segments
-        ]
-    finally:
-        Path(audio_path).unlink(missing_ok=True)

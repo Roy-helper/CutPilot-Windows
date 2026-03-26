@@ -18,9 +18,7 @@ interface PyWebViewAPI {
   get_history(): Promise<HistoryEntry[]>
   clear_history(): Promise<{ success: boolean; error?: string }>
   test_connection(provider: string, apiKey: string, baseUrl?: string, model?: string): Promise<{ success: boolean; error?: string; model?: string }>
-  process_video(videoPath: string, settingsOverride?: Record<string, unknown>): Promise<ProcessResult>
   process_batch(videoPaths: string[]): Promise<ProcessResult[]>
-  is_processing(): Promise<boolean>
   cancel_processing(): Promise<{ success: boolean; error?: string }>
   export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
   get_encoder_info(): Promise<EncoderInfo>
@@ -59,8 +57,6 @@ export interface ScriptVersion {
   title: string
   structure: string
   sentence_ids: number[]
-  hook_text: string
-  why_it_may_work: string
   reason: string
   estimated_duration: number
   score: number
@@ -106,9 +102,6 @@ declare global {
   }
 }
 
-/** True when running inside pywebview (not browser dev mode). */
-export const isNative = (): boolean => !!window.pywebview?.api
-
 /**
  * Wait for pywebview API to be injected (max 5s), then return it.
  * Returns null if timeout (dev mode).
@@ -132,13 +125,6 @@ export function waitForApi(): Promise<PyWebViewAPI | null> {
     }, 5000)
   })
   return _apiReady
-}
-
-/**
- * Get the pywebview API, or null in dev mode.
- */
-function getApi(): PyWebViewAPI | null {
-  return window.pywebview?.api ?? null
 }
 
 // ── Bridge functions ───────────────────────────────────────
@@ -213,15 +199,6 @@ export async function testConnection(
   return api
     ? await api.test_connection(provider, apiKey, baseUrl ?? '', model ?? '')
     : { success: true, model: 'dev-mock' }
-}
-
-export async function processVideo(
-  videoPath: string, settingsOverride?: Record<string, unknown>
-): Promise<ProcessResult> {
-  const api = await waitForApi()
-  return api
-    ? await api.process_video(videoPath, settingsOverride)
-    : { success: false, error: 'Dev mode — no backend', versions: [], output_files: [] }
 }
 
 export async function processBatch(videoPaths: string[]): Promise<ProcessResult[]> {

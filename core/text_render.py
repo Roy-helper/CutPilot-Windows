@@ -5,7 +5,6 @@ Generates styled text card images for video overlays.
 from __future__ import annotations
 
 import logging
-import platform
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont

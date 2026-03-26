@@ -177,7 +177,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
               duration: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
               score: v.score,
               tags: [v.approach_tag],
-              hashtags: v.tags.map(t => `#${t}`),
+              hashtags: v.tags.map(t => t.startsWith('#') ? t : `#${t}`),
               selected: true,
               outputPath: outputMap.get(v.version_id) ?? '',
               thumbnail: '',

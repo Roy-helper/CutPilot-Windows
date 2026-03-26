@@ -66,9 +66,6 @@ PROVIDERS: tuple[ProviderPreset, ...] = (
     ),
 )
 
-DEFAULT_PROVIDER_ID = PROVIDERS[0].id
-
-
 def get_provider(provider_id: str) -> ProviderPreset | None:
     """Look up a provider by ID."""
     for p in PROVIDERS:
