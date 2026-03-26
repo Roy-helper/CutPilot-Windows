@@ -17,11 +17,14 @@ pywebview>=5.0
 bottle>=0.12
 certifi
 
-# Speech recognition
-openai-whisper>=20240930
-torch>=2.0
+# Speech recognition (cloud — default)
+dashscope>=1.0
+certifi
 
-# Optional: FunASR (better Chinese, hotwords, speaker diarization)
-# pip install funasr torchaudio
+# Optional: local Whisper (needs torch, ~800MB)
+# pip install openai-whisper torch
+
+# Optional: local FunASR (best Chinese, ~2GB)
+# pip install funasr torch torchaudio
 
 # Hardware detection (no extra deps needed)

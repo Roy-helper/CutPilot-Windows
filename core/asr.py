@@ -35,34 +35,58 @@ def check_asr_available() -> dict:
     """Check ASR engine availability.
 
     Returns:
-        {"installed": bool, "models_cached": bool, "engine": str, "message": str}
+        {"installed": bool, "models_cached": bool, "engine": str, "message": str,
+         "whisper_available": bool, "funasr_available": bool, "cloud_available": bool}
     """
-    # Check Whisper (primary engine, lightweight)
+    result = {"installed": False, "models_cached": False, "engine": "none",
+              "message": "", "whisper_available": False, "funasr_available": False,
+              "cloud_available": False}
+
+    # Check cloud API (DashScope) — just needs API key
+    try:
+        from core.user_settings import load_user_settings
+        settings = load_user_settings()
+        has_key = bool(settings.get("api_key", ""))
+        try:
+            import dashscope  # noqa: F401
+            result["cloud_available"] = has_key
+            if has_key:
+                result["installed"] = True
+                result["models_cached"] = True
+                result["engine"] = "cloud"
+                result["message"] = "语音识别就绪 (云端 API)"
+        except ImportError:
+            pass
+    except Exception:
+        pass
+
+    # Check Whisper
     try:
         import whisper  # noqa: F401
-        # Check if model is bundled or cached
-        bundled = _find_bundled_model()
-        cache_dir = Path.home() / ".cache" / "whisper"
-        has_model = bundled is not None or ((cache_dir / "small.pt").exists() if cache_dir.exists() else False)
-        if has_model:
-            return {"installed": True, "models_cached": True, "engine": "whisper",
-                    "message": "语音识别就绪 (Whisper)" + (" [内置]" if bundled else "")}
-        else:
-            return {"installed": True, "models_cached": False, "engine": "whisper",
-                    "message": "需下载语音模型（约 461MB）"}
+        result["whisper_available"] = True
+        if not result["installed"]:
+            result["installed"] = True
+            result["engine"] = "whisper"
+            result["models_cached"] = True
+            result["message"] = "语音识别就绪 (Whisper 本地)"
     except ImportError:
         pass
 
-    # Check FunASR (optional, better quality)
+    # Check FunASR
     try:
         import funasr  # noqa: F401
-        return {"installed": True, "models_cached": False, "engine": "funasr",
-                "message": "语音识别就绪 (FunASR)"}
+        result["funasr_available"] = True
+        if not result["installed"]:
+            result["installed"] = True
+            result["engine"] = "funasr"
+            result["message"] = "语音识别就绪 (FunASR 本地)"
     except ImportError:
         pass
 
-    return {"installed": False, "models_cached": False, "engine": "none",
-            "message": "语音识别组件未安装"}
+    if not result["installed"]:
+        result["message"] = "语音识别不可用: 请配置 API Key 或安装本地引擎"
+
+    return result
 
 
 def _get_local_model():
@@ -201,53 +225,140 @@ def _transcribe_local(
 
 
 # ---------------------------------------------------------------------------
-# Whisper engine (default — lightweight, PyInstaller compatible)
+# Cloud ASR: DashScope Paraformer (default — zero local deps)
+# ---------------------------------------------------------------------------
+
+
+def _split_by_punctuation(text: str, begin_ms: int, end_ms: int) -> list[TranscriptSegment]:
+    """Split a long text segment into sentences by Chinese punctuation.
+
+    Distributes time proportionally by character count.
+    """
+    punct = set("。？！；")
+    total_chars = len(text)
+    if total_chars == 0:
+        return []
+
+    segments: list[TranscriptSegment] = []
+    current = ""
+    current_start = begin_ms
+
+    for char in text:
+        current += char
+        if char in punct and current.strip():
+            # Proportional time
+            ratio = len(current) / total_chars
+            duration = end_ms - begin_ms
+            seg_end = current_start + int(ratio * duration)
+            segments.append(TranscriptSegment(
+                start=current_start / 1000.0,
+                end=seg_end / 1000.0,
+                text=current.strip(),
+            ))
+            current_start = seg_end
+            current = ""
+
+    if current.strip():
+        segments.append(TranscriptSegment(
+            start=current_start / 1000.0,
+            end=end_ms / 1000.0,
+            text=current.strip(),
+        ))
+
+    return segments
+
+
+def _transcribe_dashscope(audio_path: str, api_key: str) -> list[TranscriptSegment]:
+    """Transcribe using DashScope Paraformer cloud API.
+
+    Args:
+        audio_path: Path to WAV file (16kHz, mono, PCM).
+        api_key: DashScope API key.
+
+    Returns:
+        List of TranscriptSegment with sentence-level timestamps.
+    """
+    import certifi
+    import os
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
+    import dashscope
+    from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
+
+    dashscope.api_key = api_key
+
+    raw_sentences: list[dict] = []
+    done_event = threading.Event()
+    error_msg = [None]
+
+    class Callback(RecognitionCallback):
+        def on_event(self, result: RecognitionResult):
+            s = result.get_sentence()
+            if s and s.get("text", "").strip():
+                raw_sentences.append(dict(s))
+
+        def on_complete(self):
+            done_event.set()
+
+        def on_error(self, result):
+            error_msg[0] = str(result)
+            done_event.set()
+
+    recognition = Recognition(
+        model="paraformer-realtime-v2",
+        format="pcm",
+        sample_rate=16000,
+        semantic_sentence_detection=True,
+        callback=Callback(),
+    )
+
+    with open(audio_path, "rb") as f:
+        header = f.read(44)  # skip WAV header
+        audio_data = f.read()
+
+    recognition.start()
+    chunk_size = 3200  # 100ms of 16kHz mono 16bit
+    for i in range(0, len(audio_data), chunk_size):
+        recognition.send_audio_frame(audio_data[i:i + chunk_size])
+    recognition.stop()
+
+    done_event.wait(timeout=300)
+
+    if error_msg[0]:
+        raise RuntimeError(f"云端语音识别失败: {error_msg[0]}")
+
+    # Split large segments into sentences by punctuation
+    segments: list[TranscriptSegment] = []
+    for s in raw_sentences:
+        begin = s.get("begin_time")
+        end = s.get("end_time")
+        text = s.get("text", "").strip()
+        if begin is not None and end is not None and text:
+            sub_segments = _split_by_punctuation(text, begin, end)
+            segments.extend(sub_segments)
+
+    logger.info("云端语音识别完成: %d 句", len(segments))
+    return segments
+
+
+# ---------------------------------------------------------------------------
+# Whisper engine (fallback — local, needs model download)
 # ---------------------------------------------------------------------------
 
 _whisper_model = None
 _whisper_lock = threading.Lock()
 
 
-def _find_bundled_model() -> str | None:
-    """Find Whisper model bundled with PyInstaller, or in project models/ dir."""
-    import sys
-    candidates = [
-        # PyInstaller bundle: _MEIPASS/models/whisper/small.pt
-        Path(getattr(sys, '_MEIPASS', '')) / "models" / "whisper" / "small.pt",
-        # Development: project root models/
-        Path(__file__).parent.parent / "models" / "whisper" / "small.pt",
-    ]
-    for p in candidates:
-        if p.exists():
-            logger.info("Found bundled Whisper model: %s", p)
-            return str(p.parent)
-    return None
-
-
 def _get_whisper_model(model_name: str = "small"):
-    """Lazy-load Whisper model (singleton, thread-safe).
-
-    Priority:
-    1. Bundled model (in PyInstaller package or models/ dir)
-    2. Cached model (~/.cache/whisper/)
-    3. Download from internet (fallback)
-    """
+    """Lazy-load Whisper model (singleton, thread-safe)."""
     global _whisper_model
     with _whisper_lock:
         if _whisper_model is not None:
             return _whisper_model
         try:
             import whisper
-
-            # Check for bundled model first (no network needed)
-            bundled_dir = _find_bundled_model()
-            if bundled_dir:
-                logger.info("使用内置 Whisper 模型...")
-                _whisper_model = whisper.load_model(model_name, download_root=bundled_dir)
-            else:
-                logger.info("加载 Whisper %s 模型...", model_name)
-                _whisper_model = whisper.load_model(model_name)
-
+            logger.info("加载 Whisper %s 模型...", model_name)
+            _whisper_model = whisper.load_model(model_name)
             logger.info("Whisper 模型加载完成")
             return _whisper_model
         except Exception as exc:
@@ -256,18 +367,12 @@ def _get_whisper_model(model_name: str = "small"):
 
 
 def _transcribe_whisper(video_path: str) -> list[TranscriptSegment]:
-    """Transcribe using OpenAI Whisper (local, no API key needed)."""
+    """Transcribe using OpenAI Whisper (local)."""
     model = _get_whisper_model()
     if model is None:
-        raise RuntimeError("Whisper 模型加载失败")
+        raise RuntimeError("Whisper 模型不可用")
 
-    result = model.transcribe(
-        video_path,
-        language="zh",
-        task="transcribe",
-        verbose=False,
-    )
-
+    result = model.transcribe(video_path, language="zh", verbose=False)
     segments: list[TranscriptSegment] = []
     for seg in result.get("segments", []):
         text = seg.get("text", "").strip()
@@ -291,7 +396,12 @@ async def transcribe_video(
     hotwords: str = "",
     enable_diarization: bool = True,
 ) -> list[TranscriptSegment]:
-    """Transcribe video. Priority: FunASR (if installed) → Whisper → HTTP.
+    """Transcribe video.
+
+    Priority:
+    1. DashScope cloud API (default, zero local deps, needs API key)
+    2. FunASR local (if installed)
+    3. Whisper local (if installed)
 
     Args:
         video_path: Path to the input video file.
@@ -305,16 +415,46 @@ async def transcribe_video(
     if not video_path_obj.exists():
         raise FileNotFoundError(f"视频文件不存在: {video_path_obj}")
 
-    # Priority 1: FunASR (better for Chinese, supports hotwords + diarization)
+    # Priority 1: DashScope cloud API (no local model needed)
+    try:
+        from core.user_settings import load_user_settings
+        settings = load_user_settings()
+        api_key = settings.get("api_key", "")
+        if api_key:
+            import asyncio
+            import subprocess
+            import tempfile
+
+            # Extract audio to WAV
+            audio_path = tempfile.mktemp(suffix=".wav")
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", str(video_path),
+                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                audio_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+
+            try:
+                result = await asyncio.to_thread(_transcribe_dashscope, audio_path, api_key)
+                if result:
+                    logger.info("语音识别完成 (云端): %d 段", len(result))
+                    return result
+            finally:
+                Path(audio_path).unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("云端语音识别失败，尝试本地引擎: %s", exc)
+
+    # Priority 2: FunASR local
     try:
         result = _transcribe_local(video_path, hotwords=hotwords, enable_diarization=enable_diarization)
         if result:
             logger.info("语音识别完成 (FunASR): %d 段", len(result))
             return result
     except Exception as exc:
-        logger.info("FunASR 不可用，使用 Whisper: %s", exc)
+        logger.info("FunASR 不可用: %s", exc)
 
-    # Priority 2: Whisper (always works, auto-downloads model)
+    # Priority 3: Whisper local
     try:
         import asyncio
         result = await asyncio.to_thread(_transcribe_whisper, video_path)
@@ -322,13 +462,9 @@ async def transcribe_video(
             logger.info("语音识别完成 (Whisper): %d 段", len(result))
             return result
     except Exception as exc:
-        logger.warning("Whisper 识别失败: %s", exc)
+        logger.warning("Whisper 不可用: %s", exc)
 
-    # Priority 3: HTTP fallback
-    try:
-        return await _transcribe_http(video_path, funasr_url)
-    except Exception as exc:
-        raise RuntimeError("语音识别失败，请检查网络连接或联系管理员") from exc
+    raise RuntimeError("语音识别失败: 云端 API 和本地引擎均不可用，请检查 API Key 和网络连接")
 
 
 async def _transcribe_http(
