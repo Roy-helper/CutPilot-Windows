@@ -69,6 +69,11 @@ class PythonBridge:
         from core.hwaccel import get_max_parallel
         return get_max_parallel()
 
+    def run_benchmark(self) -> dict:
+        """Run system benchmark and return detailed parallel capacity info."""
+        from core.hwaccel import benchmark_parallel
+        return benchmark_parallel()
+
     # ── ASR Status ───────────────────────────────────────────
 
     def check_asr_status(self) -> dict:
@@ -79,14 +84,28 @@ class PythonBridge:
         except Exception as e:
             return {"installed": False, "models_cached": False, "engine": "none", "message": str(e)}
 
-    def download_asr_model(self) -> dict:
-        """Download Whisper model to local cache. Blocking call (~461MB)."""
+    def download_asr_model(self, engine: str = "whisper") -> dict:
+        """Download ASR model. engine: 'whisper' or 'funasr'."""
         try:
-            import whisper
-            logger.info("开始下载 Whisper small 模型...")
-            whisper.load_model("small")
-            logger.info("Whisper 模型下载完成")
-            return {"success": True, "message": "语音模型下载完成"}
+            if engine == "funasr":
+                logger.info("开始下载 FunASR 模型（约 2GB）...")
+                from funasr import AutoModel
+                AutoModel(
+                    model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+                    vad_model="fsmn-vad",
+                    punc_model="ct-punc",
+                    spk_model="cam++",
+                    device="cpu",
+                    disable_update=False,
+                )
+                return {"success": True, "message": "FunASR 模型下载完成"}
+            else:
+                logger.info("开始下载 Whisper small 模型（约 461MB）...")
+                import whisper
+                whisper.load_model("small")
+                return {"success": True, "message": "Whisper 模型下载完成"}
+        except ImportError as e:
+            return {"success": False, "message": f"引擎未安装: {e}"}
         except Exception as e:
             logger.exception("模型下载失败")
             return {"success": False, "message": f"下载失败: {e}"}

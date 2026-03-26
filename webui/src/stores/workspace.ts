@@ -7,7 +7,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
   selectFiles, processBatch, exportVersions, getEncoderInfo, getMaxParallel,
-  previewVideo, openFolder, checkAsrStatus,
+  previewVideo, openFolder, checkAsrStatus, runBenchmark,
   type ProcessResult, type EncoderInfo,
 } from '@/bridge'
 import { useNotificationStore } from './notifications'
@@ -54,9 +54,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function detectEncoder() {
     if (encoderDetected.value) return
-    const info = await getEncoderInfo()
-    encoderName.value = info.is_hardware ? `${info.name} (硬件加速)` : info.name
-    maxParallel.value = await getMaxParallel()
+    // Run full benchmark for accurate parallel count
+    const bench = await runBenchmark()
+    encoderName.value = bench.is_hardware ? `${bench.encoder} (硬件加速)` : bench.encoder
+    maxParallel.value = bench.max_parallel
     encoderDetected.value = true
   }
 

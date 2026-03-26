@@ -228,23 +228,101 @@ def get_ffmpeg_params(quality: str = "medium") -> list[str]:
     return params
 
 
-def get_max_parallel() -> int:
-    """Return the recommended number of parallel encode jobs.
+_cached_parallel: int | None = None
 
-    Based on encoder type and actual CPU core count:
-    - Hardware encoder (VideoToolbox/NVENC/QSV): limited by encoder channels,
-      typically min(cpu_cores, 8) — hardware handles encoding, CPU still does
-      ASR + AI calls + MoviePy processing.
-    - Software encoder (libx264): CPU-bound, use half the cores to avoid
-      overloading during AI API calls.
+
+def _get_available_ram_gb() -> float:
+    """Return available system RAM in GB."""
+    try:
+        import psutil
+        return psutil.virtual_memory().available / (1024 ** 3)
+    except ImportError:
+        pass
+    # Fallback: read from OS
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                ["sysctl", "-n", "hw.memsize"],
+                capture_output=True, text=True, timeout=5,
+            )
+            total_bytes = int(result.stdout.strip())
+            return total_bytes / (1024 ** 3) * 0.6  # assume 60% available
+        elif sys.platform == "win32":
+            result = subprocess.run(
+                ["wmic", "OS", "get", "FreePhysicalMemory"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.strip().splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    return int(line) / (1024 ** 2)  # KB to GB
+    except Exception:
+        pass
+    return 4.0  # conservative fallback
+
+
+def benchmark_parallel() -> dict:
+    """Run a quick benchmark to determine safe parallel job count.
+
+    Tests actual system capacity by checking:
+    1. CPU core count
+    2. Available RAM (each video job needs ~1-2GB)
+    3. Encoder type (hardware vs software)
+
+    Returns:
+        {"max_parallel": int, "cpu_cores": int, "ram_gb": float,
+         "encoder": str, "reason": str}
     """
+    global _cached_parallel  # noqa: PLW0603
     cpu_count = os.cpu_count() or 2
+    ram_gb = _get_available_ram_gb()
     encoder = get_encoder_info()
 
-    if encoder.is_hardware:
-        # Hardware encoder: CPU is free for ASR/AI, allow more parallelism
-        # but cap at 8 to avoid memory issues with large videos
-        return min(cpu_count, 8)
+    # Each video processing job uses approximately:
+    # - ASR (Whisper): ~1.5GB RAM
+    # - MoviePy + FFmpeg: ~0.5GB RAM
+    # - Total per job: ~2GB
+    ram_per_job_gb = 2.0
+    max_by_ram = max(1, int(ram_gb / ram_per_job_gb))
 
-    # Software: heavy CPU usage per encode, be conservative
-    return max(1, cpu_count // 2)
+    if encoder.is_hardware:
+        # Hardware encoder: CPU available for other work
+        # Limit by RAM and reasonable encoder channel count
+        max_by_cpu = cpu_count
+    else:
+        # Software encoder: each encode uses ~2 CPU cores
+        max_by_cpu = max(1, cpu_count // 2)
+
+    # Take the minimum of all constraints
+    recommended = min(max_by_ram, max_by_cpu, 8)  # absolute cap at 8
+    recommended = max(1, recommended)  # at least 1
+
+    reason_parts = []
+    if recommended == max_by_ram:
+        reason_parts.append(f"内存限制 ({ram_gb:.1f}GB 可用)")
+    if recommended == max_by_cpu:
+        reason_parts.append(f"CPU 限制 ({cpu_count} 核)")
+    reason = "、".join(reason_parts) if reason_parts else f"{cpu_count} 核 CPU, {ram_gb:.1f}GB 内存"
+
+    _cached_parallel = recommended
+    logger.info(
+        "Benchmark: cpu=%d, ram=%.1fGB, encoder=%s → parallel=%d (%s)",
+        cpu_count, ram_gb, encoder.name, recommended, reason,
+    )
+
+    return {
+        "max_parallel": recommended,
+        "cpu_cores": cpu_count,
+        "ram_gb": round(ram_gb, 1),
+        "encoder": encoder.name,
+        "is_hardware": encoder.is_hardware,
+        "reason": reason,
+    }
+
+
+def get_max_parallel() -> int:
+    """Return recommended parallel count. Uses cached benchmark result."""
+    if _cached_parallel is not None:
+        return _cached_parallel
+    result = benchmark_parallel()
+    return result["max_parallel"]
