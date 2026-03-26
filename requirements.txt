@@ -16,9 +16,11 @@ pillow>=10.0
 pywebview>=5.0
 bottle>=0.12
 
-# Speech recognition (FunASR)
-funasr>=1.0
+# Speech recognition
+openai-whisper>=20240930
 torch>=2.0
-torchaudio>=2.0
+
+# Optional: FunASR (better Chinese, hotwords, speaker diarization)
+# pip install funasr torchaudio
 
 # Hardware detection (no extra deps needed)

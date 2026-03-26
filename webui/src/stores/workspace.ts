@@ -110,12 +110,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const asrStatus = await checkAsrStatus()
     if (!asrStatus.installed) {
       const notify = useNotificationStore()
-      notify.add('error', '语音识别组件未安装', '请联系管理员安装 funasr 和 torch')
+      notify.add('error', '语音识别组件未安装', '请联系管理员')
       return
-    }
-    if (!asrStatus.models_cached) {
-      const notify = useNotificationStore()
-      notify.add('info', '首次使用需下载语音模型', '约 1GB，下载完成后可离线使用。处理第一个视频时会自动下载，请耐心等待。')
     }
 
     isProcessing.value = true
@@ -127,9 +123,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       file.icon = 'video_library'
     }
 
+    if (!asrStatus.models_cached) {
+      const notify = useNotificationStore()
+      notify.add('info', '首次使用需下载语音模型', '约 461MB，处理时自动下载，请耐心等待')
+    }
+
     progressText.value = asrStatus.models_cached
       ? `正在处理 0/${pending.length} 个视频...`
-      : `首次下载语音模型中（约 1GB），请耐心等待...`
+      : `首次下载语音模型中（约 461MB），请耐心等待...`
     progress.value = 5
 
     try {
