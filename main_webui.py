@@ -588,14 +588,31 @@ def main():
 
     api = PythonBridge()
 
-    # Try pywebview first; fall back to Bottle + browser if .NET is missing
-    try:
-        import webview as _wv_test
-        # Quick check: try importing the platform module that triggers pythonnet
-        if sys.platform == "win32":
+    # Check if pywebview/.NET is available on Windows
+    _use_native_window = True
+    if sys.platform == "win32":
+        try:
             import clr  # noqa: F401 — triggers pythonnet/.NET check
-    except Exception:
-        logger.warning("pywebview/.NET not available, falling back to browser mode")
+        except Exception:
+            _use_native_window = False
+            logger.warning(".NET Framework not available — will use browser mode")
+            # Show a dialog telling user what's happening
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    "检测到您的电脑缺少 .NET Framework 运行环境。\n\n"
+                    "CutPilot 将自动使用浏览器模式运行（功能完全相同）。\n\n"
+                    "如需使用独立窗口模式，请安装 .NET Framework 4.8：\n"
+                    "https://dotnet.microsoft.com/download/dotnet-framework/net48\n\n"
+                    "点击「确定」继续启动...",
+                    "CutPilot — 环境提示",
+                    0x00000040,  # MB_ICONINFORMATION
+                )
+            except Exception:
+                pass
+
+    if not _use_native_window:
         _start_bottle_server(api)
         return
 
