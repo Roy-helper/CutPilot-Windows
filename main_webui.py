@@ -533,12 +533,72 @@ class PythonBridge:
         return results
 
 
+def _start_bottle_server(api: PythonBridge, port: int = 18989) -> None:
+    """Fallback: serve the Vue app via Bottle + expose API as JSON endpoints.
+
+    Used when pywebview cannot initialize (missing .NET Framework).
+    Opens the UI in the system default browser.
+    """
+    import json
+    import webbrowser
+    from bottle import Bottle, static_file, request, response
+
+    app = Bottle()
+    index_html = _DIST_DIR / "index.html"
+
+    # Serve static files
+    @app.route("/")
+    def serve_index():
+        return static_file("index.html", root=str(_DIST_DIR))
+
+    @app.route("/assets/<filepath:path>")
+    def serve_assets(filepath):
+        return static_file(filepath, root=str(_DIST_DIR / "assets"))
+
+    @app.route("/<filepath:path>")
+    def serve_static(filepath):
+        return static_file(filepath, root=str(_DIST_DIR))
+
+    # JSON-RPC style bridge: POST /api/<method_name>
+    @app.route("/api/<method_name>", method="POST")
+    def api_call(method_name):
+        response.content_type = "application/json"
+        method = getattr(api, method_name, None)
+        if method is None:
+            return json.dumps({"error": f"Unknown method: {method_name}"})
+        try:
+            body = request.json or {}
+            args = body.get("args", [])
+            kwargs = body.get("kwargs", {})
+            result = method(*args, **kwargs)
+            return json.dumps(result, default=str, ensure_ascii=False)
+        except Exception as e:
+            logger.exception("API call failed: %s", method_name)
+            return json.dumps({"error": str(e)})
+
+    logger.info("Starting fallback Bottle server on http://localhost:%d", port)
+    webbrowser.open(f"http://localhost:{port}")
+    app.run(host="localhost", port=port, quiet=True)
+
+
 def main():
     if not _DIST_DIR.exists():
         logger.error("Web UI not built. Run: npm --prefix webui run build")
         sys.exit(1)
 
     api = PythonBridge()
+
+    # Try pywebview first; fall back to Bottle + browser if .NET is missing
+    try:
+        import webview as _wv_test
+        # Quick check: try importing the platform module that triggers pythonnet
+        if sys.platform == "win32":
+            import clr  # noqa: F401 — triggers pythonnet/.NET check
+    except Exception:
+        logger.warning("pywebview/.NET not available, falling back to browser mode")
+        _start_bottle_server(api)
+        return
+
     window = webview.create_window(
         title="CutPilot — AI 副驾驶",
         url=str(_DIST_DIR / "index.html"),
@@ -551,7 +611,6 @@ def main():
 
     def on_loaded():
         api.set_window(window)
-        # Check license and warn if expired
         try:
             from core.license import check_license, get_trial_remaining
             is_valid, message, expiry = check_license()
@@ -573,12 +632,11 @@ def main():
 
     window.events.loaded += on_loaded
 
-    # Use EdgeChromium (WebView2) on Windows — avoids pythonnet/.NET dependency issues.
-    # WebView2 runtime is pre-installed on Windows 10 1803+ and all Windows 11.
-    gui = None
-    if sys.platform == "win32":
-        gui = "edgechromium"
-    webview.start(debug=("--debug" in sys.argv), gui=gui)
+    try:
+        webview.start(debug=("--debug" in sys.argv))
+    except Exception:
+        logger.warning("pywebview failed to start, falling back to browser mode")
+        _start_bottle_server(api)
 
 
 if __name__ == "__main__":

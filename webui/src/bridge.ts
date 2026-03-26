@@ -103,8 +103,8 @@ declare global {
 }
 
 /**
- * Wait for pywebview API to be injected (max 5s), then return it.
- * Returns null if timeout (dev mode).
+ * Wait for pywebview API to be injected (max 3s), then return it.
+ * Returns null if timeout (browser fallback mode).
  */
 let _apiReady: Promise<PyWebViewAPI | null> | null = null
 
@@ -119,77 +119,91 @@ export function waitForApi(): Promise<PyWebViewAPI | null> {
       resolve(window.pywebview?.api ?? null)
     }
     window.addEventListener('pywebviewready', onReady, { once: true })
-    // Timeout: if pywebview never injects, we're in dev mode
     globalThis.setTimeout(() => {
       resolve(window.pywebview?.api ?? null)
-    }, 5000)
+    }, 3000)
   })
   return _apiReady
 }
 
+/**
+ * HTTP fallback: call Python backend via Bottle JSON API.
+ * Used when running in browser mode (no pywebview).
+ */
+async function httpCall(method: string, ...args: unknown[]): Promise<any> {
+  try {
+    const resp = await fetch(`/api/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args }),
+    })
+    return await resp.json()
+  } catch {
+    return null
+  }
+}
+
 // ── Bridge functions ───────────────────────────────────────
+// Each function tries pywebview API first, then HTTP fallback for browser mode.
 
 export async function ping(): Promise<string> {
   const api = await waitForApi()
-  return api ? await api.ping() : 'pong (dev)'
+  return api ? await api.ping() : (await httpCall('ping') ?? 'pong')
 }
 
 export async function getMachineId(): Promise<string> {
   const api = await waitForApi()
-  return api ? await api.get_machine_id() : 'DEV-0000-0000-0000'
+  return api ? await api.get_machine_id() : (await httpCall('get_machine_id') ?? 'UNKNOWN')
 }
 
 export async function getLicenseInfo(): Promise<Record<string, unknown>> {
   const api = await waitForApi()
-  return api ? await api.get_license_info() : { is_valid: false, status_message: '开发模式', expiry: null, trial_remaining: 0 }
+  return api ? await api.get_license_info() : (await httpCall('get_license_info') ?? { is_valid: false, trial_remaining: 99 })
 }
 
 export async function activateLicense(code: string): Promise<{ success: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.activate_license(code) : { success: false, message: '后端未连接' }
+  return api ? await api.activate_license(code) : (await httpCall('activate_license', code) ?? { success: false, message: '后端未连接' })
 }
 
 export async function loadSettings(): Promise<Record<string, unknown>> {
   const api = await waitForApi()
-  return api ? await api.load_settings() : {}
+  return api ? await api.load_settings() : (await httpCall('load_settings') ?? {})
 }
 
 export async function saveSettings(settings: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
   const api = await waitForApi()
-  return api ? await api.save_settings(settings) : { success: true }
+  return api ? await api.save_settings(settings) : (await httpCall('save_settings', settings) ?? { success: true })
 }
 
 export async function getProviders(): Promise<ProviderPreset[]> {
   const api = await waitForApi()
-  return api ? await api.get_providers() : [
-    { id: 'deepseek', name: 'DeepSeek', base_url: '', model: 'deepseek-chat', api_key_hint: 'sk-...' },
-    { id: 'qwen', name: '通义千问', base_url: '', model: 'qwen-plus', api_key_hint: 'sk-...' },
-  ]
+  return api ? await api.get_providers() : (await httpCall('get_providers') ?? [])
 }
 
 export async function selectFiles(): Promise<string[]> {
   const api = await waitForApi()
-  return api ? await api.select_files() : []
+  return api ? await api.select_files() : (await httpCall('select_files') ?? [])
 }
 
 export async function selectDirectory(): Promise<string> {
   const api = await waitForApi()
-  return api ? await api.select_directory() : ''
+  return api ? await api.select_directory() : (await httpCall('select_directory') ?? '')
 }
 
 export async function openFolder(path: string): Promise<{ success: boolean; error?: string }> {
   const api = await waitForApi()
-  return api ? await api.open_folder(path) : { success: false, error: 'Dev mode' }
+  return api ? await api.open_folder(path) : (await httpCall('open_folder', path) ?? { success: false })
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {
   const api = await waitForApi()
-  return api ? await api.get_history() : []
+  return api ? await api.get_history() : (await httpCall('get_history') ?? [])
 }
 
 export async function clearHistory(): Promise<{ success: boolean; error?: string }> {
   const api = await waitForApi()
-  return api ? await api.clear_history() : { success: true }
+  return api ? await api.clear_history() : (await httpCall('clear_history') ?? { success: true })
 }
 
 export async function testConnection(
@@ -198,29 +212,29 @@ export async function testConnection(
   const api = await waitForApi()
   return api
     ? await api.test_connection(provider, apiKey, baseUrl ?? '', model ?? '')
-    : { success: true, model: 'dev-mock' }
+    : (await httpCall('test_connection', provider, apiKey, baseUrl ?? '', model ?? '') ?? { success: false })
 }
 
 export async function processBatch(videoPaths: string[]): Promise<ProcessResult[]> {
   const api = await waitForApi()
   return api
     ? await api.process_batch(videoPaths)
-    : videoPaths.map(() => ({ success: false, error: 'Dev mode', versions: [], output_files: [] }))
+    : (await httpCall('process_batch', videoPaths) ?? videoPaths.map(() => ({ success: false, error: '后端未连接', versions: [], output_files: [] })))
 }
 
 export async function cancelProcessing(): Promise<{ success: boolean; error?: string }> {
   const api = await waitForApi()
-  return api ? await api.cancel_processing() : { success: false, error: 'Dev mode' }
+  return api ? await api.cancel_processing() : (await httpCall('cancel_processing') ?? { success: false })
 }
 
 export async function getEncoderInfo(): Promise<EncoderInfo> {
   const api = await waitForApi()
-  return api ? await api.get_encoder_info() : { codec: 'libx264', name: 'Software x264 (dev)', is_hardware: false, extra_params: [] }
+  return api ? await api.get_encoder_info() : (await httpCall('get_encoder_info') ?? { codec: 'libx264', name: 'Software x264', is_hardware: false, extra_params: [] })
 }
 
 export async function getMaxParallel(): Promise<number> {
   const api = await waitForApi()
-  return api ? await api.get_max_parallel() : 2
+  return api ? await api.get_max_parallel() : (await httpCall('get_max_parallel') ?? 2)
 }
 
 export async function exportVersions(
@@ -229,37 +243,37 @@ export async function exportVersions(
   const api = await waitForApi()
   return api
     ? await api.export_versions(videoPath, versionIds, options)
-    : { success: false, error: 'Dev mode' }
+    : (await httpCall('export_versions', videoPath, versionIds, options) ?? { success: false })
 }
 
 export async function checkAsrStatus(engine?: string): Promise<{ ready: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.check_asr_status(engine ?? '') : { ready: false, message: '后端未连接' }
+  return api ? await api.check_asr_status(engine ?? '') : (await httpCall('check_asr_status', engine ?? '') ?? { ready: false, message: '后端未连接' })
 }
 
 export async function downloadAsrModel(engine?: string): Promise<{ success: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.download_asr_model(engine ?? '') : { success: false, message: '后端未连接' }
+  return api ? await api.download_asr_model(engine ?? '') : (await httpCall('download_asr_model', engine ?? '') ?? { success: false, message: '后端未连接' })
 }
 
 export async function runBenchmark(): Promise<BenchmarkResult> {
   const api = await waitForApi()
-  return api ? await api.run_benchmark() : { max_parallel: 1, cpu_cores: 1, ram_gb: 0, encoder: 'unknown', is_hardware: false, reason: '后端未连接' }
+  return api ? await api.run_benchmark() : (await httpCall('run_benchmark') ?? { max_parallel: 1, cpu_cores: 1, ram_gb: 0, encoder: 'unknown', is_hardware: false, reason: '后端未连接' })
 }
 
 export async function previewVideo(filePath: string): Promise<{ success: boolean; error?: string }> {
   const api = await waitForApi()
-  return api ? await api.preview_video(filePath) : { success: false, error: 'Dev mode' }
+  return api ? await api.preview_video(filePath) : (await httpCall('preview_video', filePath) ?? { success: false })
 }
 
 export async function deleteHistoryEntry(timestamp: string): Promise<{ success: boolean; error?: string }> {
   const api = await waitForApi()
-  return api ? await api.delete_history_entry(timestamp) : { success: true }
+  return api ? await api.delete_history_entry(timestamp) : (await httpCall('delete_history_entry', timestamp) ?? { success: true })
 }
 
 export async function generateThumbnail(videoPath: string, timeSec: number = 1.0): Promise<string> {
   const api = await waitForApi()
-  return api ? await api.generate_thumbnail(videoPath, timeSec) : ''
+  return api ? await api.generate_thumbnail(videoPath, timeSec) : (await httpCall('generate_thumbnail', videoPath, timeSec) ?? '')
 }
 
 // ── Progress event listener ────────────────────────────────
