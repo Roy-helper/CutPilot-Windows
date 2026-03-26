@@ -51,6 +51,7 @@ const saveMsg = ref<string | null>(null)
 const saveMsgType = ref<'success' | 'error'>('success')
 const detectedEncoder = ref('自动检测中...')
 const detectedParallel = ref(0)
+const asrEngine = ref('faster-whisper')
 const asrModelReady = ref(false)
 const asrDownloading = ref(false)
 const asrDownloadMsg = ref('')
@@ -78,6 +79,7 @@ onMounted(async () => {
     if (s.hook_text) hookText.value = s.hook_text as string
     if (s.generate_fast != null) generateFast.value = s.generate_fast as boolean
     if (s.enable_hook_overlay != null) enableHook.value = s.enable_hook_overlay as boolean
+    if (s.asr_engine) asrEngine.value = s.asr_engine as string
     if (s.enable_speaker_diarization != null) enableDiarization.value = s.enable_speaker_diarization as boolean
     if (s.hook_duration != null) hookDuration.value = s.hook_duration as number
   } catch { /* dev mode */ }
@@ -89,7 +91,7 @@ onMounted(async () => {
   } catch { /* dev mode */ }
 
   try {
-    const asr = await checkAsrStatus()
+    const asr = await checkAsrStatus(asrEngine.value)
     asrModelReady.value = asr.ready
   } catch { /* dev mode */ }
 })
@@ -120,10 +122,18 @@ async function handleActivate() {
 async function handleAsrDownload() {
   asrDownloading.value = true
   asrDownloadMsg.value = '正在下载语音模型...'
-  const res = await downloadAsrModel()
+  const res = await downloadAsrModel(asrEngine.value)
   asrDownloadMsg.value = res.message
   asrModelReady.value = res.success
   asrDownloading.value = false
+}
+
+async function handleEngineChange() {
+  asrDownloadMsg.value = ''
+  try {
+    const asr = await checkAsrStatus(asrEngine.value)
+    asrModelReady.value = asr.ready
+  } catch { /* dev mode */ }
 }
 
 async function testConnection() {
@@ -143,6 +153,7 @@ async function saveAllSettings() {
       max_versions: maxVersions.value,
       min_sentences: minSentences.value,
       video_quality: qualityToBackend[quality.value] ?? 'standard',
+      asr_engine: asrEngine.value,
       hotwords: hotwords.value,
       output_dir: outputDir.value,
       hook_text: hookText.value,
@@ -176,6 +187,7 @@ function resetToDefaults() {
   hookText.value = ''
   generateFast.value = true
   enableHook.value = false
+  asrEngine.value = 'faster-whisper'
   enableDiarization.value = false
   hookDuration.value = 3.0
   hotwords.value = ''
@@ -253,6 +265,18 @@ async function browseOutputDir() {
             <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">语音识别</h3>
           </div>
           <div class="space-y-4">
+            <!-- ASR engine selector -->
+            <div class="space-y-2">
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">识别引擎</label>
+              <select
+                v-model="asrEngine"
+                class="w-full bg-surface-container-highest border-none rounded-md py-3 px-4 text-sm focus:ring-2 focus:ring-primary/20"
+                @change="handleEngineChange"
+              >
+                <option value="faster-whisper">Faster Whisper (轻量推荐)</option>
+                <option value="funasr">FunASR (中文增强, 需下载 2GB+)</option>
+              </select>
+            </div>
             <!-- ASR model status -->
             <div class="flex justify-between items-center py-2 border-b border-outline-variant/10">
               <span class="text-sm font-medium">语音模型</span>
@@ -264,7 +288,7 @@ async function browseOutputDir() {
                   class="text-xs font-bold text-primary hover:underline"
                   :disabled="asrDownloading"
                   @click="handleAsrDownload"
-                >{{ asrDownloading ? '下载中...' : '下载 (461MB)' }}</button>
+                >{{ asrDownloading ? '下载中...' : asrEngine === 'funasr' ? '下载 FunASR (~2GB)' : '下载 (461MB)' }}</button>
               </div>
             </div>
             <p v-if="asrDownloadMsg" class="text-xs" :class="asrModelReady ? 'text-green-600' : 'text-error'">{{ asrDownloadMsg }}</p>

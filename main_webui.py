@@ -86,19 +86,33 @@ class PythonBridge:
 
     # ── ASR Status ───────────────────────────────────────────
 
-    def check_asr_status(self) -> dict:
-        """Check if ASR model is downloaded and ready."""
+    def check_asr_status(self, engine: str = "") -> dict:
+        """Check if ASR model is downloaded and ready.
+
+        Args:
+            engine: "faster-whisper" or "funasr". If empty, reads from user settings.
+        """
         try:
+            if not engine:
+                from core.user_settings import load_user_settings
+                engine = load_user_settings().get("asr_engine", "faster-whisper")
             from core.asr import get_model_status
-            return get_model_status()
+            return get_model_status(engine=engine)
         except Exception as e:
             return {"ready": False, "message": str(e)}
 
-    def download_asr_model(self) -> dict:
-        """Download faster-whisper model (~500MB)."""
+    def download_asr_model(self, engine: str = "") -> dict:
+        """Download ASR model for the given engine.
+
+        Args:
+            engine: "faster-whisper" or "funasr". If empty, reads from user settings.
+        """
         try:
+            if not engine:
+                from core.user_settings import load_user_settings
+                engine = load_user_settings().get("asr_engine", "faster-whisper")
             from core.asr import download_model
-            return download_model()
+            return download_model(engine=engine)
         except Exception as e:
             logger.exception("模型下载失败")
             return {"success": False, "message": f"下载失败: {e}"}
@@ -429,6 +443,36 @@ class PythonBridge:
         except Exception as e:
             logger.exception("Export error")
             return {"success": False, "error": str(e)}
+
+    # ── Thumbnail ────────────────────────────────────────────
+
+    def generate_thumbnail(self, video_path: str, time_sec: float = 1.0) -> str:
+        """Extract a frame from video at given timestamp, return as base64 data URI."""
+        import base64
+        import os
+        import subprocess
+        import tempfile
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+        tmp.close()
+        try:
+            subprocess.run([
+                'ffmpeg', '-y', '-ss', str(time_sec), '-i', video_path,
+                '-frames:v', '1', '-q:v', '3',
+                '-vf', 'scale=480:-1',
+                tmp.name
+            ], capture_output=True, timeout=10)
+
+            with open(tmp.name, 'rb') as f:
+                data = f.read()
+            if len(data) < 100:
+                return ''
+            b64 = base64.b64encode(data).decode('ascii')
+            return f'data:image/jpeg;base64,{b64}'
+        except Exception:
+            return ''
+        finally:
+            os.unlink(tmp.name)
 
     # ── Preview ─────────────────────────────────────────────
 

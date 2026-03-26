@@ -28,6 +28,7 @@ _DEFAULTS: dict[str, Any] = {
     "generate_fast": True,
     "enable_hook_overlay": False,
     "hook_duration": 3.0,
+    "asr_engine": "faster-whisper",
     "enable_speaker_diarization": False,
     "video_quality": "standard",
     "output_dir": "",

@@ -30,6 +30,9 @@ class CutPilotConfig(BaseSettings):
     enable_hook_overlay: bool = False
     hook_duration: float = 3.0
 
+    # ASR engine selection
+    asr_engine: Literal["faster-whisper", "funasr"] = "faster-whisper"
+
     # Speaker diarization
     enable_speaker_diarization: bool = False
 

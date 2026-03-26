@@ -24,12 +24,13 @@ interface PyWebViewAPI {
   export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
   get_encoder_info(): Promise<EncoderInfo>
   get_max_parallel(): Promise<number>
-  check_asr_status(): Promise<{ ready: boolean; message: string }>
-  download_asr_model(): Promise<{ success: boolean; message: string }>
+  check_asr_status(engine?: string): Promise<{ ready: boolean; message: string }>
+  download_asr_model(engine?: string): Promise<{ success: boolean; message: string }>
   run_benchmark(): Promise<BenchmarkResult>
   preview_video(filePath: string): Promise<{ success: boolean; error?: string }>
   get_output_files(videoPath: string): Promise<OutputFile[]>
   delete_history_entry(timestamp: string): Promise<{ success: boolean; error?: string }>
+  generate_thumbnail(videoPath: string, timeSec: number): Promise<string>
 }
 
 export interface ProviderPreset {
@@ -248,14 +249,14 @@ export async function exportVersions(
     : { success: false, error: 'Dev mode' }
 }
 
-export async function checkAsrStatus(): Promise<{ ready: boolean; message: string }> {
+export async function checkAsrStatus(engine?: string): Promise<{ ready: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.check_asr_status() : { ready: false, message: '后端未连接' }
+  return api ? await api.check_asr_status(engine ?? '') : { ready: false, message: '后端未连接' }
 }
 
-export async function downloadAsrModel(): Promise<{ success: boolean; message: string }> {
+export async function downloadAsrModel(engine?: string): Promise<{ success: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.download_asr_model() : { success: false, message: '后端未连接' }
+  return api ? await api.download_asr_model(engine ?? '') : { success: false, message: '后端未连接' }
 }
 
 export async function runBenchmark(): Promise<BenchmarkResult> {
@@ -271,6 +272,11 @@ export async function previewVideo(filePath: string): Promise<{ success: boolean
 export async function deleteHistoryEntry(timestamp: string): Promise<{ success: boolean; error?: string }> {
   const api = await waitForApi()
   return api ? await api.delete_history_entry(timestamp) : { success: true }
+}
+
+export async function generateThumbnail(videoPath: string, timeSec: number = 1.0): Promise<string> {
+  const api = await waitForApi()
+  return api ? await api.generate_thumbnail(videoPath, timeSec) : ''
 }
 
 // ── Progress event listener ────────────────────────────────

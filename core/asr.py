@@ -239,12 +239,18 @@ _fw_lock = threading.Lock()
 _MODEL_DIR = Path.home() / ".cutpilot" / "models"
 
 
-def get_model_status() -> dict:
-    """Check if faster-whisper model is downloaded.
+def get_model_status(engine: str = "faster-whisper") -> dict:
+    """Check if ASR model is downloaded for the given engine.
+
+    Args:
+        engine: "faster-whisper" or "funasr".
 
     Returns:
         {"ready": bool, "model_path": str, "message": str}
     """
+    if engine == "funasr":
+        return _get_funasr_model_status()
+
     model_dir = _MODEL_DIR / "faster-whisper-small"
     if model_dir.exists() and (model_dir / "model.bin").exists():
         return {"ready": True, "model_path": str(model_dir),
@@ -253,14 +259,53 @@ def get_model_status() -> dict:
             "message": "需要下载语音模型（约 500MB）"}
 
 
-def download_model() -> dict:
-    """Download faster-whisper small model to ~/.cutpilot/models/.
+def _get_funasr_model_status() -> dict:
+    """Check if FunASR dependencies and models are available."""
+    # Check required packages
+    missing: list[str] = []
+    for pkg in ("funasr", "torch", "torchaudio"):
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
 
-    Uses Chinese HuggingFace mirror (hf-mirror.com) to avoid GFW issues.
+    if missing:
+        return {
+            "ready": False,
+            "model_path": "",
+            "message": f"缺少依赖: {', '.join(missing)}（运行 pip install {' '.join(missing)}）",
+        }
+
+    # Packages installed — check if model files are cached
+    # FunASR caches models under ~/.cache/modelscope/hub/
+    model_cache = Path.home() / ".cache" / "modelscope" / "hub" / "iic"
+    paraformer_dir = model_cache / "speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+    if paraformer_dir.exists():
+        return {"ready": True, "model_path": str(paraformer_dir),
+                "message": "FunASR 模型就绪"}
+
+    # Also check for the simpler paraformer-zh model
+    simple_dir = model_cache / "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+    if simple_dir.exists():
+        return {"ready": True, "model_path": str(simple_dir),
+                "message": "FunASR 模型就绪"}
+
+    return {"ready": False, "model_path": str(model_cache),
+            "message": "FunASR 依赖已安装，需要下载模型（约 2GB）"}
+
+
+def download_model(engine: str = "faster-whisper") -> dict:
+    """Download ASR model for the given engine.
+
+    Args:
+        engine: "faster-whisper" or "funasr".
 
     Returns:
         {"success": bool, "message": str}
     """
+    if engine == "funasr":
+        return _download_funasr_model()
+
     import os
     # Use Chinese mirror for HuggingFace (blocked in mainland China)
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
@@ -280,7 +325,48 @@ def download_model() -> dict:
         return {"success": True, "message": "语音模型下载完成！"}
     except Exception as e:
         logger.exception("模型下载失败")
-        # Friendly Chinese error
+        err = str(e)
+        if "connect" in err.lower() or "network" in err.lower():
+            return {"success": False, "message": "网络连接失败，请检查网络后重试"}
+        return {"success": False, "message": f"下载失败: {err[:100]}"}
+
+
+def _download_funasr_model() -> dict:
+    """Download FunASR model by triggering a dry-run model load.
+
+    FunASR auto-downloads from ModelScope on first use.
+    """
+    # First check dependencies are installed
+    missing: list[str] = []
+    for pkg in ("funasr", "torch", "torchaudio"):
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+
+    if missing:
+        return {
+            "success": False,
+            "message": f"请先安装依赖: pip install {' '.join(missing)}",
+        }
+
+    try:
+        from funasr import AutoModel
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info("下载 FunASR 模型 (首次约 2GB)...")
+        AutoModel(
+            model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+            vad_model="fsmn-vad",
+            punc_model="ct-punc",
+            spk_model="cam++",
+            device=device,
+            disable_update=False,
+        )
+        logger.info("FunASR 模型下载完成")
+        return {"success": True, "message": "FunASR 模型下载完成！"}
+    except Exception as e:
+        logger.exception("FunASR 模型下载失败")
         err = str(e)
         if "connect" in err.lower() or "network" in err.lower():
             return {"success": False, "message": "网络连接失败，请检查网络后重试"}
@@ -345,17 +431,15 @@ async def transcribe_video(
     funasr_url: str = "http://localhost:10095",
     hotwords: str = "",
     enable_diarization: bool = True,
+    engine: str = "faster-whisper",
 ) -> list[TranscriptSegment]:
-    """Transcribe video.
-
-    Priority:
-    1. FunASR local (if installed, best Chinese quality)
-    2. faster-whisper local (default, lightweight)
+    """Transcribe video using the specified engine.
 
     Args:
         video_path: Path to the input video file.
         hotwords: Space-separated hotwords (FunASR only).
         enable_diarization: Enable speaker detection (FunASR only).
+        engine: "faster-whisper" (default, lightweight) or "funasr" (better Chinese).
 
     Returns:
         List of TranscriptSegment objects.
@@ -364,24 +448,35 @@ async def transcribe_video(
     if not video_path_obj.exists():
         raise FileNotFoundError(f"视频文件不存在: {video_path_obj}")
 
-    # Priority 1: FunASR local (if installed)
-    try:
-        result = _transcribe_local(video_path, hotwords=hotwords, enable_diarization=enable_diarization)
-        if result:
-            logger.info("语音识别完成 (FunASR): %d 段", len(result))
-            return result
-    except Exception as exc:
-        logger.info("FunASR 不可用: %s", exc)
+    if engine == "funasr":
+        # FunASR path: use local FunASR model
+        try:
+            result = _transcribe_local(video_path, hotwords=hotwords, enable_diarization=enable_diarization)
+            if result:
+                logger.info("语音识别完成 (FunASR): %d 段", len(result))
+                return result
+        except Exception as exc:
+            logger.warning("FunASR 识别失败: %s", exc)
+            raise RuntimeError(f"FunASR 识别失败: {exc}") from exc
+    else:
+        # faster-whisper path (default)
+        try:
+            import asyncio
+            result = await asyncio.to_thread(_transcribe_faster_whisper, video_path)
+            if result:
+                logger.info("语音识别完成 (Whisper): %d 段", len(result))
+                return result
+        except Exception as exc:
+            logger.warning("Whisper 不可用: %s", exc)
 
-    # Priority 2: faster-whisper (default)
-    try:
-        import asyncio
-        result = await asyncio.to_thread(_transcribe_faster_whisper, video_path)
-        if result:
-            logger.info("语音识别完成 (Whisper): %d 段", len(result))
-            return result
-    except Exception as exc:
-        logger.warning("Whisper 不可用: %s", exc)
+        # Fallback: try FunASR if faster-whisper fails
+        try:
+            result = _transcribe_local(video_path, hotwords=hotwords, enable_diarization=enable_diarization)
+            if result:
+                logger.info("语音识别完成 (FunASR fallback): %d 段", len(result))
+                return result
+        except Exception as exc:
+            logger.info("FunASR fallback 也不可用: %s", exc)
 
     raise RuntimeError("语音模型未下载，请在设置页点击「下载语音模型」")
 

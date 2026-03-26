@@ -113,6 +113,7 @@ async def _run_asr(
     segments = await transcribe_video(
         str(video_path), hotwords=hotwords,
         enable_diarization=config.enable_speaker_diarization,
+        engine=getattr(config, "asr_engine", "faster-whisper"),
     )
     sentences = [
         Sentence(

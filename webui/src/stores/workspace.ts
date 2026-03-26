@@ -7,7 +7,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
   selectFiles, processBatch, exportVersions, getEncoderInfo, getMaxParallel,
-  previewVideo, openFolder, checkAsrStatus, runBenchmark,
+  previewVideo, openFolder, checkAsrStatus, runBenchmark, generateThumbnail,
   type ProcessResult, type EncoderInfo,
 } from '@/bridge'
 import { useNotificationStore } from './notifications'
@@ -32,6 +32,7 @@ export interface Version {
   hashtags: string[]
   selected: boolean
   outputPath: string  // path to the generated video file
+  thumbnail: string   // base64 data URI of video frame
 }
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -178,6 +179,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
               hashtags: v.tags.map(t => `#${t}`),
               selected: true,
               outputPath: outputMap.get(v.version_id) ?? '',
+              thumbnail: '',
+            })
+          }
+          // Generate thumbnails in background (don't block UI)
+          for (const ver of versions.value.filter(vv => vv.videoPath === file.path && !vv.thumbnail)) {
+            const videoForThumb = ver.outputPath || file.path
+            generateThumbnail(videoForThumb).then(thumb => {
+              if (thumb) ver.thumbnail = thumb
             })
           }
         } else {

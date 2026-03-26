@@ -226,8 +226,9 @@ const fileStatusDot: Record<string, string> = {
             <span class="px-2 py-0.5 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold rounded-full border border-white/20">时长 {{ ver.duration }}</span>
           </div>
 
-          <div class="aspect-video relative bg-surface-container-high flex items-center justify-center">
-            <span class="material-symbols-outlined text-4xl text-on-surface-variant/30">movie</span>
+          <div class="aspect-video relative bg-surface-container-high flex items-center justify-center overflow-hidden">
+            <img v-if="ver.thumbnail" :src="ver.thumbnail" class="w-full h-full object-cover" alt="" />
+            <span v-else class="material-symbols-outlined text-4xl text-on-surface-variant/30">movie</span>
             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
               <button class="p-3 bg-white/20 backdrop-blur-xl rounded-full text-white hover:bg-white/40 transition-colors" @click.stop="store.preview(ver)">
                 <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
