@@ -24,4 +24,5 @@ certifi
 # Optional: FunASR (best Chinese, hotwords + speaker diarization)
 # pip install funasr torch torchaudio
 
-# Hardware detection (no extra deps needed)
+# Hardware detection
+psutil>=5.9

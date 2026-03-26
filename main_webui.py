@@ -459,11 +459,14 @@ class PythonBridge:
             config_output = c.output_dir
         except Exception:
             pass
-        output_dir = Path(config_output) if config_output else vpath.parent / "output"
+        base_output = Path(config_output) if config_output else vpath.parent / "output"
         stem = vpath.stem
+        # Look in per-video subfolder first, fall back to flat directory
+        video_dir = base_output / stem
+        search_dir = video_dir if video_dir.exists() else base_output
         results = []
-        if output_dir.exists():
-            for f in sorted(output_dir.glob(f"{stem}_v*")):
+        if search_dir.exists():
+            for f in sorted(search_dir.glob(f"{stem}_v*")):
                 results.append({
                     "path": str(f),
                     "name": f.name,

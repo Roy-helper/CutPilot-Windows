@@ -63,9 +63,11 @@ async def cut_versions(
         list of {"version_id": int, "path": str, "speed": str, "quality": str}
     """
     sentence_map: dict[int, Sentence] = {s.id: s for s in sentences}
-    output_dir = Path(config.output_dir).expanduser() if config.output_dir else video_path.parent / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    base_output = Path(config.output_dir).expanduser() if config.output_dir else video_path.parent / "output"
     stem = video_path.stem
+    # Each video gets its own subfolder: output/<video_stem>/
+    output_dir = base_output / stem
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Build options lookup — default if not provided
     opts_map: dict[int, ExportOptions] = {}

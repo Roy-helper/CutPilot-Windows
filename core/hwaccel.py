@@ -261,13 +261,41 @@ def _get_available_ram_gb() -> float:
     return 4.0  # conservative fallback
 
 
+def _get_nvenc_max_sessions() -> int:
+    """Query GPU model via nvidia-smi and return NVENC concurrent session limit.
+
+    Consumer GPUs (GeForce): 3 sessions (driver-enforced).
+    Professional GPUs (Quadro, A-series, RTX A-series): unlimited, cap at 8.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return 3  # conservative default
+        gpu_name = result.stdout.strip().splitlines()[0].upper()
+        logger.info("Detected GPU: %s", gpu_name)
+
+        # Professional / datacenter cards have no NVENC session limit
+        pro_keywords = ["QUADRO", "TESLA", "RTX A", "RTX 4000", "RTX 5000",
+                        "RTX 6000", "RTX 8000", "A100", "A40", "A30", "A10",
+                        "L40", "L4", "H100", "H200"]
+        if any(kw in gpu_name for kw in pro_keywords):
+            return 8  # effectively unlimited, cap for sanity
+        return 3  # GeForce consumer limit
+    except (FileNotFoundError, OSError, IndexError):
+        return 3
+
+
 def benchmark_parallel() -> dict:
     """Run a quick benchmark to determine safe parallel job count.
 
     Tests actual system capacity by checking:
     1. CPU core count
-    2. Available RAM (each video job needs ~1-2GB)
+    2. Available RAM (each video job needs ~0.8GB with faster-whisper)
     3. Encoder type (hardware vs software)
+    4. GPU NVENC session limit (for NVIDIA hardware encoders)
 
     Returns:
         {"max_parallel": int, "cpu_cores": int, "ram_gb": float,
@@ -279,35 +307,45 @@ def benchmark_parallel() -> dict:
     encoder = get_encoder_info()
 
     # Each video processing job uses approximately:
-    # - ASR (Whisper): ~1.5GB RAM
+    # - faster-whisper ASR: ~0.3GB RAM
     # - MoviePy + FFmpeg: ~0.5GB RAM
-    # - Total per job: ~2GB
-    ram_per_job_gb = 2.0
+    # - Total per job: ~0.8GB
+    ram_per_job_gb = 0.8
     max_by_ram = max(1, int(ram_gb / ram_per_job_gb))
 
     if encoder.is_hardware:
         # Hardware encoder: CPU available for other work
-        # Limit by RAM and reasonable encoder channel count
         max_by_cpu = cpu_count
+        # Check GPU-specific NVENC session limit
+        if encoder.codec == "h264_nvenc":
+            max_by_gpu = _get_nvenc_max_sessions()
+        else:
+            max_by_gpu = 4  # VideoToolbox / QSV / AMF conservative default
     else:
         # Software encoder: each encode uses ~2 CPU cores
         max_by_cpu = max(1, cpu_count // 2)
+        max_by_gpu = 999  # no GPU constraint
 
     # Take the minimum of all constraints
-    recommended = min(max_by_ram, max_by_cpu, 8)  # absolute cap at 8
+    recommended = min(max_by_ram, max_by_cpu, max_by_gpu, 8)  # absolute cap at 8
     recommended = max(1, recommended)  # at least 1
 
     reason_parts = []
-    if recommended == max_by_ram:
+    bottleneck = min(max_by_ram, max_by_cpu, max_by_gpu)
+    if bottleneck == max_by_gpu and encoder.is_hardware:
+        reason_parts.append(f"GPU 编码限制 (最多 {max_by_gpu} 路)")
+    if bottleneck == max_by_ram:
         reason_parts.append(f"内存限制 ({ram_gb:.1f}GB 可用)")
-    if recommended == max_by_cpu:
+    if bottleneck == max_by_cpu:
         reason_parts.append(f"CPU 限制 ({cpu_count} 核)")
     reason = "、".join(reason_parts) if reason_parts else f"{cpu_count} 核 CPU, {ram_gb:.1f}GB 内存"
 
     _cached_parallel = recommended
     logger.info(
-        "Benchmark: cpu=%d, ram=%.1fGB, encoder=%s → parallel=%d (%s)",
-        cpu_count, ram_gb, encoder.name, recommended, reason,
+        "Benchmark: cpu=%d, ram=%.1fGB, encoder=%s, gpu_limit=%s → parallel=%d (%s)",
+        cpu_count, ram_gb, encoder.name,
+        max_by_gpu if encoder.is_hardware else "N/A",
+        recommended, reason,
     )
 
     return {
