@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import TopBar from '@/components/TopBar.vue'
-import { onPipelineProgress } from '@/bridge'
+import { onPipelineProgress, onBatchSummary } from '@/bridge'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useNotificationStore } from '@/stores/notifications'
 
@@ -9,6 +9,22 @@ const store = useWorkspaceStore()
 
 const activeFilter = ref('all')
 const searchQuery = ref('')
+const isDragging = ref(false)
+const showMoreMenu = ref(false)
+
+// Close dropdown on outside click
+function onDocClick(e: MouseEvent) {
+  if (showMoreMenu.value && !(e.target as HTMLElement)?.closest?.('.relative')) {
+    showMoreMenu.value = false
+  }
+}
+
+function onDrop(e: DragEvent) {
+  isDragging.value = false
+  if (e.dataTransfer?.files?.length) {
+    store.addDroppedFiles(e.dataTransfer.files)
+  }
+}
 
 const filteredVersions = computed(() => {
   let list = store.versions
@@ -31,6 +47,7 @@ const filteredVersions = computed(() => {
 
 // Listen for progress + import events
 let removeProgressListener: (() => void) | null = null
+let removeSummaryListener: (() => void) | null = null
 function onImportEvent() { store.importFiles() }
 
 onMounted(async () => {
@@ -45,13 +62,25 @@ onMounted(async () => {
     }
     if (e.index != null) store.updateFileProgress(e.index, e.label, e.percent)
   })
+  removeSummaryListener = onBatchSummary((summary) => {
+    const n = useNotificationStore()
+    if (summary.fail_count === 0) {
+      n.add('success', '全部完成', `${summary.success_count} 个视频处理成功`)
+    } else {
+      const errorDetails = summary.errors.map(e => `${e.video}: ${e.error}`).join('\n')
+      n.add('error', `${summary.success_count} 成功, ${summary.fail_count} 失败`, errorDetails)
+    }
+  })
   window.addEventListener('import-files', onImportEvent)
+  document.addEventListener('click', onDocClick)
   await store.detectEncoder()
 })
 
 onUnmounted(() => {
   removeProgressListener?.()
+  removeSummaryListener?.()
   window.removeEventListener('import-files', onImportEvent)
+  document.removeEventListener('click', onDocClick)
 })
 
 const notify = useNotificationStore()
@@ -81,26 +110,43 @@ const fileStatusDot: Record<string, string> = {
 <template>
   <TopBar v-model="searchQuery" search-placeholder="搜索版本标题、标签...">
     <template #actions>
-      <button
-        class="px-4 py-2 text-on-surface-variant text-sm font-medium hover:bg-surface-variant rounded-md transition-all disabled:opacity-30"
-        :disabled="store.isProcessing || !store.hasFiles"
-        @click="store.clear()"
-      >清空</button>
-      <button
-        v-if="store.hasVersions"
-        class="px-4 py-2 text-on-surface-variant text-sm font-medium hover:bg-surface-variant rounded-md transition-all"
-        @click="store.openOutputFolder()"
-      >打开目录</button>
-      <button
-        v-if="store.hasVersions"
-        class="px-4 py-2 text-on-surface-variant text-sm font-medium hover:bg-surface-variant rounded-md transition-all"
-        @click="copyAllVersionText"
-      >复制全部文案</button>
+      <!-- More menu (清空/打开目录/复制文案) -->
+      <div class="relative" v-if="store.hasFiles">
+        <button
+          class="px-3 py-2 text-on-surface-variant text-sm font-medium hover:bg-surface-variant rounded-md transition-all flex items-center gap-1"
+          @click="showMoreMenu = !showMoreMenu"
+        >
+          <span class="material-symbols-outlined text-base">more_horiz</span>
+          <span>更多</span>
+        </button>
+        <div
+          v-if="showMoreMenu"
+          class="absolute right-0 top-full mt-1 w-40 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/20 py-1 z-50"
+        >
+          <button
+            class="w-full px-4 py-2.5 text-left text-sm text-on-surface-variant hover:bg-surface-variant/50 transition-colors disabled:opacity-30"
+            :disabled="store.isProcessing"
+            @click="store.clear(); showMoreMenu = false"
+          >清空文件</button>
+          <button
+            v-if="store.hasVersions"
+            class="w-full px-4 py-2.5 text-left text-sm text-on-surface-variant hover:bg-surface-variant/50 transition-colors"
+            @click="store.openOutputFolder(); showMoreMenu = false"
+          >打开输出目录</button>
+          <button
+            v-if="store.hasVersions"
+            class="w-full px-4 py-2.5 text-left text-sm text-on-surface-variant hover:bg-surface-variant/50 transition-colors"
+            @click="copyAllVersionText(); showMoreMenu = false"
+          >复制全部文案</button>
+        </div>
+      </div>
+      <!-- Export -->
       <button
         class="px-4 py-2 bg-surface-container-high text-on-surface text-sm font-medium rounded-md hover:bg-surface-container-highest transition-all disabled:opacity-30"
         :disabled="store.selectedVersions.length === 0 || store.isExporting"
         @click="store.exportSelected()"
       >{{ store.isExporting ? '导出中...' : `导出选中${store.selectedVersions.length > 0 ? ` (${store.selectedVersions.length})` : ''}` }}</button>
+      <!-- Cancel / Generate -->
       <button
         v-if="store.isProcessing"
         class="px-6 py-2 text-white text-sm font-bold rounded-xl shadow-lg shadow-error/20 active:scale-95 transition-all bg-error hover:bg-error/80 flex items-center gap-1.5"
@@ -149,13 +195,18 @@ const fileStatusDot: Record<string, string> = {
       <!-- Empty: Drop zone -->
       <div
         v-if="!store.hasFiles"
-        class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-outline-variant/40 rounded-xl cursor-pointer hover:border-primary hover:bg-primary-fixed/10 transition-all group"
+        class="flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-xl cursor-pointer transition-all group"
+        :class="isDragging ? 'border-primary bg-primary-fixed/20 scale-[1.01]' : 'border-outline-variant/40 hover:border-primary hover:bg-primary-fixed/10'"
         @click="store.importFiles()"
+        @dragover.prevent="isDragging = true"
+        @dragenter.prevent="isDragging = true"
+        @dragleave.prevent="isDragging = false"
+        @drop.prevent="onDrop"
       >
-        <span class="material-symbols-outlined text-4xl text-on-surface-variant/30 group-hover:text-primary transition-colors mb-3">upload_file</span>
-        <p class="text-sm font-semibold text-on-surface-variant/60 group-hover:text-on-surface transition-colors">选择视频文件</p>
-        <p class="text-[10px] text-on-surface-variant/40 mt-1">点击导入本地视频</p>
-        <p class="text-[10px] text-outline mt-3">支持 MP4 / MOV / AVI / MKV</p>
+        <span class="material-symbols-outlined text-4xl transition-colors mb-3" :class="isDragging ? 'text-primary' : 'text-on-surface-variant/30 group-hover:text-primary'">upload_file</span>
+        <p class="text-sm font-semibold transition-colors" :class="isDragging ? 'text-primary' : 'text-on-surface-variant/60 group-hover:text-on-surface'">{{ isDragging ? '松开即可导入' : '拖入或点击选择视频' }}</p>
+        <p class="text-[10px] text-on-surface-variant/40 mt-1">支持批量拖入多个文件</p>
+        <p class="text-[10px] text-outline mt-3">MP4 / MOV / AVI / MKV</p>
       </div>
 
       <!-- File list -->
@@ -184,10 +235,19 @@ const fileStatusDot: Record<string, string> = {
             <p class="text-xs font-bold truncate">{{ file.name }}</p>
             <div class="flex items-center gap-1.5 mt-1">
               <span class="w-1.5 h-1.5 rounded-full" :class="fileStatusDot[file.status]"></span>
-              <span class="text-[10px] font-medium" :class="file.status === 'error' ? 'text-error' : 'text-on-surface-variant'">{{ file.statusLabel }}</span>
+              <span class="text-[10px] font-medium truncate" :class="file.status === 'error' ? 'text-error' : 'text-on-surface-variant'" :title="file.statusLabel">{{ file.statusLabel }}</span>
             </div>
           </div>
         </div>
+        <!-- Retry failed button -->
+        <button
+          v-if="store.failedFiles.length > 0 && !store.isProcessing"
+          class="mt-2 w-full py-2 text-xs font-bold text-error bg-error-container/30 rounded-lg hover:bg-error-container/50 transition-colors flex items-center justify-center gap-1.5 shrink-0"
+          @click="store.retryFailed()"
+        >
+          <span class="material-symbols-outlined text-sm">refresh</span>
+          重试失败 ({{ store.failedFiles.length }})
+        </button>
       </div>
     </section>
 
@@ -213,11 +273,28 @@ const fileStatusDot: Record<string, string> = {
         <p class="text-xs text-on-surface-variant/30 mt-1">导入视频后点击「一键生成」开始</p>
       </div>
 
-      <!-- Processing state -->
-      <div v-else-if="!store.hasVersions && store.isProcessing" class="flex-1 flex flex-col items-center justify-center text-center">
-        <span class="material-symbols-outlined text-6xl text-primary/40 mb-4 animate-spin" style="animation-duration: 3s;">progress_activity</span>
-        <p class="text-sm font-semibold text-on-surface-variant/60">AI 正在处理中...</p>
-        <p class="text-xs text-on-surface-variant/30 mt-1">可以切换到其他页面，处理不会中断</p>
+      <!-- Processing state: skeleton cards -->
+      <div v-else-if="!store.hasVersions && store.isProcessing" class="grid grid-cols-2 gap-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
+        <div v-for="n in 3" :key="n" class="bg-surface-container-lowest rounded-xl overflow-hidden animate-pulse">
+          <!-- Thumbnail skeleton -->
+          <div class="aspect-video bg-surface-container-high flex items-center justify-center">
+            <span class="material-symbols-outlined text-3xl text-on-surface-variant/15">movie</span>
+          </div>
+          <!-- Content skeleton -->
+          <div class="p-4 space-y-3">
+            <div class="h-4 bg-surface-container-high rounded w-3/4"></div>
+            <div class="space-y-2">
+              <div class="h-3 bg-surface-container rounded w-full"></div>
+              <div class="h-3 bg-surface-container rounded w-5/6"></div>
+              <div class="h-3 bg-surface-container rounded w-2/3"></div>
+            </div>
+            <div class="flex gap-2 pt-1">
+              <div class="h-5 bg-surface-container rounded-full w-16"></div>
+              <div class="h-5 bg-surface-container rounded-full w-12"></div>
+              <div class="h-5 bg-surface-container rounded-full w-14"></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div v-else class="grid grid-cols-2 gap-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
@@ -293,6 +370,6 @@ const fileStatusDot: Record<string, string> = {
         <span class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">并行: 最多 {{ store.maxParallel }} 路</span>
       </div>
     </div>
-    <p class="text-[10px] font-medium text-on-surface-variant/60 uppercase tracking-[0.2em]">CutPilot v4.0.1</p>
+    <p class="text-[10px] font-medium text-on-surface-variant/60 uppercase tracking-[0.2em]">CutPilot v4.2</p>
   </footer>
 </template>

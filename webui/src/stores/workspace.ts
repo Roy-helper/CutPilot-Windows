@@ -299,11 +299,84 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const failedFiles = computed(() => files.value.filter(f => f.status === 'error'))
+
+  async function retryFailed() {
+    const failed = failedFiles.value
+    if (failed.length === 0 || isProcessing.value) return
+
+    // Reset failed files to pending
+    for (const file of failed) {
+      file.status = 'processing'
+      file.statusLabel = '重试中...'
+      file.icon = 'video_library'
+    }
+
+    isProcessing.value = true
+    progressText.value = `正在重试 ${failed.length} 个失败视频...`
+    progress.value = 5
+
+    try {
+      const paths = failed.map(f => f.path)
+      const results = await processBatch(paths)
+
+      for (let i = 0; i < failed.length; i++) {
+        const file = failed[i]!
+        const result = results[i]!
+        file.result = result
+
+        if (result.success) {
+          file.status = 'done'
+          file.statusLabel = `${result.versions.length} 个版本`
+          const outputMap = new Map<number, string>()
+          for (const of_ of (result.output_files ?? [])) {
+            if (!outputMap.has(of_.version_id)) outputMap.set(of_.version_id, of_.path)
+          }
+          for (const v of result.versions) {
+            const mins = Math.floor(v.estimated_duration / 60)
+            const secs = Math.round(v.estimated_duration % 60)
+            versions.value.push({
+              versionId: v.version_id,
+              videoPath: file.path,
+              title: v.cover_title || v.title,
+              description: v.publish_text,
+              duration: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
+              score: v.score,
+              tags: [v.approach_tag],
+              hashtags: v.tags.map(t => t.startsWith('#') ? t : `#${t}`),
+              selected: true,
+              outputPath: outputMap.get(v.version_id) ?? '',
+              thumbnail: '',
+            })
+          }
+          for (const ver of versions.value.filter(vv => vv.videoPath === file.path && !vv.thumbnail)) {
+            const videoForThumb = ver.outputPath || file.path
+            generateThumbnail(videoForThumb).then(thumb => { if (thumb) ver.thumbnail = thumb })
+          }
+        } else {
+          file.status = 'error'
+          file.statusLabel = result.error || '重试仍失败'
+          file.icon = 'error'
+        }
+      }
+      const notify = useNotificationStore()
+      const retried = failed.length
+      const fixed = failed.filter(f => f.status === 'done').length
+      notify.add(fixed === retried ? 'success' : 'error',
+        `重试完成: ${fixed}/${retried} 成功`,
+        fixed < retried ? `${retried - fixed} 个仍然失败` : '')
+    } finally {
+      isProcessing.value = false
+      progress.value = 0
+      progressText.value = ''
+    }
+  }
+
   return {
     files, versions, progress, progressText, isProcessing, isExporting,
     encoderName, maxParallel,
-    pendingFiles, selectedVersions, hasFiles, hasVersions,
+    pendingFiles, failedFiles, selectedVersions, hasFiles, hasVersions,
     detectEncoder, importFiles, addDroppedFiles, generate, cancelGenerate,
-    exportSelected, clear, updateFileProgress, preview, openOutputFolder,
+    retryFailed, exportSelected, clear, updateFileProgress, preview, openOutputFolder,
   }
 })

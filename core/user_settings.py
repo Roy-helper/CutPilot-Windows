@@ -33,6 +33,8 @@ _DEFAULTS: dict[str, Any] = {
     "video_quality": "high",
     "output_dir": "",
     "hotwords": "",
+    "ai_timeout": 1800.0,
+    "asr_model_size": "small",
 }
 
 

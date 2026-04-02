@@ -21,6 +21,9 @@ class CutPilotConfig(BaseSettings):
     base_url: str = "https://api.deepseek.com/v1"
     model: str = "deepseek-chat"
 
+    # AI timeout (seconds) — increase for long videos
+    ai_timeout: float = 1800.0  # 30 minutes
+
     # Processing
     max_versions: int = 3
     min_sentences: int = 15
@@ -32,6 +35,9 @@ class CutPilotConfig(BaseSettings):
 
     # ASR engine selection
     asr_engine: Literal["faster-whisper", "funasr"] = "faster-whisper"
+
+    # ASR model size (faster-whisper only): tiny (fast) / small (default) / medium (accurate)
+    asr_model_size: Literal["tiny", "small", "medium"] = "small"
 
     # Speaker diarization
     enable_speaker_diarization: bool = False

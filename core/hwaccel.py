@@ -228,6 +228,23 @@ def get_ffmpeg_params(quality: str = "medium") -> list[str]:
     return params
 
 
+def diagnose_gpu() -> dict:
+    """Return a diagnostic snapshot of the current GPU/encoder state.
+
+    Used by the frontend to display encoder info with GPU model.
+    """
+    encoder = get_encoder_info()
+    is_nvenc = encoder.codec == "h264_nvenc"
+    return {
+        "encoder_name": encoder.name,
+        "encoder_codec": encoder.codec,
+        "is_hardware": encoder.is_hardware,
+        "detection_method": "ffmpeg -encoders probe",
+        "gpu_model": _get_gpu_name() if is_nvenc else None,
+        "nvenc_sessions": _get_nvenc_max_sessions() if is_nvenc else None,
+    }
+
+
 _cached_parallel: int | None = None
 
 
@@ -261,31 +278,40 @@ def _get_available_ram_gb() -> float:
     return 4.0  # conservative fallback
 
 
+def _get_gpu_name() -> str | None:
+    """Query GPU model name via nvidia-smi. Returns None if unavailable."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().splitlines()[0]
+    except (FileNotFoundError, OSError, IndexError):
+        pass
+    return None
+
+
 def _get_nvenc_max_sessions() -> int:
     """Query GPU model via nvidia-smi and return NVENC concurrent session limit.
 
     Consumer GPUs (GeForce): 3 sessions (driver-enforced).
     Professional GPUs (Quadro, A-series, RTX A-series): unlimited, cap at 8.
     """
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode != 0:
-            return 3  # conservative default
-        gpu_name = result.stdout.strip().splitlines()[0].upper()
-        logger.info("Detected GPU: %s", gpu_name)
+    gpu_name = _get_gpu_name()
+    if gpu_name is None:
+        return 3  # conservative default
 
-        # Professional / datacenter cards have no NVENC session limit
-        pro_keywords = ["QUADRO", "TESLA", "RTX A", "RTX 4000", "RTX 5000",
-                        "RTX 6000", "RTX 8000", "A100", "A40", "A30", "A10",
-                        "L40", "L4", "H100", "H200"]
-        if any(kw in gpu_name for kw in pro_keywords):
-            return 8  # effectively unlimited, cap for sanity
-        return 3  # GeForce consumer limit
-    except (FileNotFoundError, OSError, IndexError):
-        return 3
+    gpu_upper = gpu_name.upper()
+    logger.info("Detected GPU: %s", gpu_name)
+
+    # Professional / datacenter cards have no NVENC session limit
+    pro_keywords = ["QUADRO", "TESLA", "RTX A", "RTX 4000", "RTX 5000",
+                    "RTX 6000", "RTX 8000", "A100", "A40", "A30", "A10",
+                    "L40", "L4", "H100", "H200"]
+    if any(kw in gpu_upper for kw in pro_keywords):
+        return 8  # effectively unlimited, cap for sanity
+    return 3  # GeForce consumer limit
 
 
 def benchmark_parallel() -> dict:
@@ -308,7 +334,7 @@ def benchmark_parallel() -> dict:
 
     # Each video processing job uses approximately:
     # - faster-whisper ASR: ~0.3GB RAM
-    # - MoviePy + FFmpeg: ~0.5GB RAM
+    # - FFmpeg encode: ~0.5GB RAM
     # - Total per job: ~0.8GB
     ram_per_job_gb = 0.8
     max_by_ram = max(1, int(ram_gb / ram_per_job_gb))

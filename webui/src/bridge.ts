@@ -21,7 +21,9 @@ interface PyWebViewAPI {
   process_batch(videoPaths: string[]): Promise<ProcessResult[]>
   cancel_processing(): Promise<{ success: boolean; error?: string }>
   export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
+  export_logs(): Promise<{ success: boolean; message: string; path?: string }>
   get_encoder_info(): Promise<EncoderInfo>
+  get_gpu_info(): Promise<GpuInfo>
   get_max_parallel(): Promise<number>
   check_asr_status(engine?: string): Promise<{ ready: boolean; message: string }>
   download_asr_model(engine?: string): Promise<{ success: boolean; message: string }>
@@ -94,6 +96,15 @@ export interface EncoderInfo {
   name: string
   is_hardware: boolean
   extra_params: string[]
+}
+
+export interface GpuInfo {
+  encoder_name: string
+  encoder_codec: string
+  is_hardware: boolean
+  detection_method: string
+  gpu_model: string | null
+  nvenc_sessions: number | null
 }
 
 declare global {
@@ -232,6 +243,16 @@ export async function getEncoderInfo(): Promise<EncoderInfo> {
   return api ? await api.get_encoder_info() : (await httpCall('get_encoder_info') ?? { codec: 'libx264', name: 'Software x264', is_hardware: false, extra_params: [] })
 }
 
+export async function exportLogs(): Promise<{ success: boolean; message: string; path?: string }> {
+  const api = await waitForApi()
+  return api ? await api.export_logs() : (await httpCall('export_logs') ?? { success: false, message: '后端未连接' })
+}
+
+export async function getGpuInfo(): Promise<GpuInfo> {
+  const api = await waitForApi()
+  return api ? await api.get_gpu_info() : (await httpCall('get_gpu_info') ?? { encoder_name: 'Software x264', encoder_codec: 'libx264', is_hardware: false, detection_method: 'unknown', gpu_model: null, nvenc_sessions: null })
+}
+
 export async function getMaxParallel(): Promise<number> {
   const api = await waitForApi()
   return api ? await api.get_max_parallel() : (await httpCall('get_max_parallel') ?? 2)
@@ -292,4 +313,37 @@ export function onPipelineProgress(callback: (e: ProgressEvent) => void): () => 
   }
   window.addEventListener('pipeline-progress', handler)
   return () => window.removeEventListener('pipeline-progress', handler)
+}
+
+// ── Batch summary event listener ──────────────────────────
+
+export interface BatchSummary {
+  total: number
+  success_count: number
+  fail_count: number
+  errors: { video: string; error: string }[]
+}
+
+export function onBatchSummary(callback: (e: BatchSummary) => void): () => void {
+  const handler = (evt: Event) => {
+    const detail = (evt as CustomEvent).detail as BatchSummary
+    callback(detail)
+  }
+  window.addEventListener('batch-summary', handler)
+  return () => window.removeEventListener('batch-summary', handler)
+}
+
+// ── Download progress event listener ──────────────────────
+
+export interface DownloadProgressEvent {
+  percent: number
+}
+
+export function onDownloadProgress(callback: (e: DownloadProgressEvent) => void): () => void {
+  const handler = (evt: Event) => {
+    const detail = (evt as CustomEvent).detail as DownloadProgressEvent
+    callback(detail)
+  }
+  window.addEventListener('download-progress', handler)
+  return () => window.removeEventListener('download-progress', handler)
 }

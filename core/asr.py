@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -238,7 +238,7 @@ _fw_lock = threading.Lock()
 _MODEL_DIR = Path.home() / ".cutpilot" / "models"
 
 
-def get_model_status(engine: str = "faster-whisper") -> dict:
+def get_model_status(engine: str = "faster-whisper", **kwargs) -> dict:
     """Check if ASR model is downloaded for the given engine.
 
     Args:
@@ -250,12 +250,14 @@ def get_model_status(engine: str = "faster-whisper") -> dict:
     if engine == "funasr":
         return _get_funasr_model_status()
 
-    model_dir = _MODEL_DIR / "faster-whisper-small"
+    model_size = kwargs.get("model_size", "small")
+    model_dir = _MODEL_DIR / f"faster-whisper-{model_size}"
     if model_dir.exists() and (model_dir / "model.bin").exists():
         return {"ready": True, "model_path": str(model_dir),
-                "message": "语音模型就绪"}
+                "message": f"语音模型就绪 ({model_size})"}
+    size_map = {"tiny": "~75MB", "small": "~500MB", "medium": "~1.5GB"}
     return {"ready": False, "model_path": str(model_dir),
-            "message": "需要下载语音模型（约 500MB）"}
+            "message": f"需要下载语音模型（{size_map.get(model_size, '~500MB')}）"}
 
 
 def _get_funasr_model_status() -> dict:
@@ -293,11 +295,16 @@ def _get_funasr_model_status() -> dict:
             "message": "FunASR 依赖已安装，需要下载模型（约 2GB）"}
 
 
-def download_model(engine: str = "faster-whisper") -> dict:
+def download_model(
+    engine: str = "faster-whisper",
+    on_progress: Callable[[int], None] | None = None,
+    **kwargs,
+) -> dict:
     """Download ASR model for the given engine.
 
     Args:
         engine: "faster-whisper" or "funasr".
+        on_progress: Optional callback ``(percent: int)`` for download progress.
 
     Returns:
         {"success": bool, "message": str}
@@ -308,26 +315,84 @@ def download_model(engine: str = "faster-whisper") -> dict:
     import os
     # Use Chinese mirror for HuggingFace (blocked in mainland China)
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+    # Connection timeout for huggingface_hub (uses requests internally)
+    os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "30"
 
     _MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    output_dir = str(_MODEL_DIR / "faster-whisper-small")
+    model_size = kwargs.get("model_size", "small")
+    output_dir = str(_MODEL_DIR / f"faster-whisper-{model_size}")
+    mirror_url = f"https://hf-mirror.com/Systran/faster-whisper-{model_size}"
+
+    _manual_download_msg = (
+        f"模型下载失败。请手动下载后放到以下目录：\n"
+        f"{output_dir}\n"
+        f"下载地址：{mirror_url}"
+    )
+
+    if on_progress:
+        on_progress(0)
 
     try:
         from huggingface_hub import snapshot_download
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
         logger.info("下载语音模型到 %s (使用国内镜像)...", output_dir)
-        snapshot_download(
-            "Systran/faster-whisper-small",
-            local_dir=output_dir,
-            local_dir_use_symlinks=False,
-        )
+
+        # Run download in thread with 10-minute timeout
+        def _do_download() -> None:
+            snapshot_download(
+                f"Systran/faster-whisper-{model_size}",
+                local_dir=output_dir,
+                local_dir_use_symlinks=False,
+            )
+
+        # Start download with progress polling
+        import threading
+        done_event = threading.Event()
+
+        def _poll_progress() -> None:
+            """Poll output dir size to estimate progress."""
+            # faster-whisper-small is ~460MB
+            expected_bytes = 460 * 1024 * 1024
+            while not done_event.is_set():
+                if on_progress:
+                    try:
+                        total = sum(
+                            f.stat().st_size
+                            for f in Path(output_dir).rglob("*")
+                            if f.is_file()
+                        )
+                        pct = min(90, int(total / expected_bytes * 90))
+                        on_progress(pct)
+                    except Exception:
+                        pass
+                done_event.wait(5)
+
+        progress_thread = threading.Thread(target=_poll_progress, daemon=True)
+        progress_thread.start()
+
+        try:
+            with ThreadPoolExecutor(1) as pool:
+                future = pool.submit(_do_download)
+                future.result(timeout=600)  # 10 minutes
+        finally:
+            done_event.set()
+            progress_thread.join(timeout=2)
+
+        if on_progress:
+            on_progress(100)
+
         logger.info("语音模型下载完成")
         return {"success": True, "message": "语音模型下载完成！"}
+    except FuturesTimeout:
+        logger.error("模型下载超时（10分钟）")
+        return {"success": False, "message": f"下载超时（10分钟）。\n{_manual_download_msg}"}
     except Exception as e:
         logger.exception("模型下载失败")
         err = str(e)
-        if "connect" in err.lower() or "network" in err.lower():
-            return {"success": False, "message": "网络连接失败，请检查网络后重试"}
-        return {"success": False, "message": f"下载失败: {err[:100]}"}
+        if "connect" in err.lower() or "network" in err.lower() or "timeout" in err.lower():
+            return {"success": False, "message": f"网络连接失败。\n{_manual_download_msg}"}
+        return {"success": False, "message": f"下载失败: {err[:100]}\n{_manual_download_msg}"}
 
 
 def _download_funasr_model() -> dict:

@@ -8,8 +8,7 @@ httpx>=0.24
 pydantic>=2.0
 pydantic-settings>=2.0
 
-# Video editing
-moviepy>=2.0
+# Video editing (pure FFmpeg, no MoviePy)
 pillow>=10.0
 
 # Desktop UI

@@ -5,14 +5,28 @@ of a video using FFmpeg.
 """
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
+import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 from core.text_render import find_cjk_font, render_text_card
 
 logger = logging.getLogger(__name__)
+
+
+def _needs_temp_copy(path: str) -> bool:
+    """Check if the path has non-ASCII chars that FFmpeg can't handle on Windows."""
+    if sys.platform != "win32":
+        return False
+    try:
+        path.encode("ascii")
+        return False
+    except UnicodeEncodeError:
+        return True
 
 
 def create_hook_image(
@@ -58,7 +72,7 @@ async def burn_hook_overlay(
         return video_path
 
     try:
-        probe = await _probe_video_dimensions(video_path)
+        probe = _probe_video_dimensions(video_path)
         width, height = probe["width"], probe["height"]
 
         overlay_png = create_hook_image(hook_text, width, height)
@@ -68,7 +82,7 @@ async def burn_hook_overlay(
             output_path = video_path.with_name(
                 f"{video_path.stem}_hooked{video_path.suffix}"
             )
-            await _ffmpeg_overlay(video_path, overlay_png, output_path, duration)
+            _ffmpeg_overlay(video_path, overlay_png, output_path, duration)
             logger.info("Hook overlay burned: %s -> %s", video_path.name, output_path.name)
             return output_path
         finally:
@@ -83,11 +97,11 @@ async def burn_hook_overlay(
 
 
 # ---------------------------------------------------------------------------
-# FFmpeg helpers
+# FFmpeg helpers (subprocess.run — Windows thread-safe)
 # ---------------------------------------------------------------------------
 
 
-async def _ffmpeg_overlay(
+def _ffmpeg_overlay(
     video_path: Path,
     overlay_path: Path,
     output_path: Path,
@@ -103,59 +117,98 @@ async def _ffmpeg_overlay(
         f"enable='between(t,0,{duration})'[out]"
     )
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(video_path),
-        "-i", str(overlay_path),
-        "-filter_complex", filter_complex,
-        "-map", "[out]",
-        "-map", "0:a?",
-        "-c:a", "copy",
-        "-c:v", "libx264",
-        "-crf", "18",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        str(output_path),
-    ]
+    from core.editor import _get_fps_mode_flag
 
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await process.communicate()
+    # Protect non-ASCII paths on Windows
+    temp_video: str | None = None
+    temp_out: str | None = None
+    try:
+        effective_video = str(video_path)
+        if _needs_temp_copy(effective_video):
+            fd, temp_video = tempfile.mkstemp(suffix=video_path.suffix)
+            import os
+            os.close(fd)
+            shutil.copy2(effective_video, temp_video)
+            effective_video = temp_video
 
-    if process.returncode != 0:
-        error_msg = stderr.decode().strip() if stderr else "Unknown error"
-        raise RuntimeError(f"FFmpeg overlay failed: {error_msg}")
+        effective_output = str(output_path)
+        if _needs_temp_copy(effective_output):
+            cache_dir = Path.home() / ".cutpilot" / "cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            import uuid
+            temp_out = str(cache_dir / f"ovl_{uuid.uuid4().hex[:8]}{output_path.suffix}")
+            effective_output = temp_out
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", effective_video,
+            "-i", str(overlay_path),
+            "-filter_complex", filter_complex,
+            "-map", "[out]",
+            "-map", "0:a?",
+            *_get_fps_mode_flag(),
+            "-c:a", "copy",
+            "-c:v", "libx264",
+            "-crf", "18",
+            "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p",
+            effective_output,
+        ]
+
+        completed = subprocess.run(cmd, capture_output=True, timeout=300)
+        if completed.returncode != 0:
+            error_msg = completed.stderr.decode(errors="replace").strip()
+            if len(error_msg) > 500:
+                error_msg = error_msg[-500:]
+            raise RuntimeError(f"FFmpeg overlay failed: {error_msg}")
+
+        # Move temp output to real path if needed
+        if temp_out:
+            shutil.move(temp_out, str(output_path))
+            temp_out = None
+    finally:
+        if temp_video:
+            Path(temp_video).unlink(missing_ok=True)
+        if temp_out:
+            Path(temp_out).unlink(missing_ok=True)
 
 
-async def _probe_video_dimensions(video_path: Path) -> dict[str, int]:
+def _probe_video_dimensions(video_path: Path) -> dict[str, int]:
     """Return {'width': int, 'height': int} for the video."""
-    import json
+    effective_path = str(video_path)
+    temp_probe: str | None = None
 
-    process = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "quiet",
-        "-print_format", "json",
-        "-show_streams",
-        "-select_streams", "v:0",
-        str(video_path),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await process.communicate()
+    try:
+        if _needs_temp_copy(effective_path):
+            fd, temp_probe = tempfile.mkstemp(suffix=video_path.suffix)
+            import os
+            os.close(fd)
+            shutil.copy2(effective_path, temp_probe)
+            effective_path = temp_probe
 
-    if process.returncode != 0:
-        error_msg = stderr.decode().strip() if stderr else "Unknown error"
-        raise RuntimeError(f"ffprobe failed: {error_msg}")
+        completed = subprocess.run(
+            ["ffprobe", "-v", "quiet",
+             "-print_format", "json",
+             "-show_streams",
+             "-select_streams", "v:0",
+             effective_path],
+            capture_output=True, timeout=30,
+        )
 
-    data = json.loads(stdout.decode())
-    streams = data.get("streams", [])
-    if not streams:
-        raise RuntimeError(f"No video stream found in {video_path}")
+        if completed.returncode != 0:
+            error_msg = completed.stderr.decode(errors="replace").strip() if completed.stderr else "Unknown error"
+            raise RuntimeError(f"ffprobe failed: {error_msg}")
 
-    stream = streams[0]
-    return {
-        "width": int(stream["width"]),
-        "height": int(stream["height"]),
-    }
+        data = json.loads(completed.stdout.decode())
+        streams = data.get("streams", [])
+        if not streams:
+            raise RuntimeError(f"No video stream found in {video_path}")
+
+        stream = streams[0]
+        return {
+            "width": int(stream["width"]),
+            "height": int(stream["height"]),
+        }
+    finally:
+        if temp_probe:
+            Path(temp_probe).unlink(missing_ok=True)

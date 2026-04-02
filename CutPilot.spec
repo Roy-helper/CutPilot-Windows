@@ -6,13 +6,15 @@ binaries = []
 hiddenimports = ['webview', 'bottle', 'certifi', 'openai', 'httpx', 'httpcore', 'pydantic', 'pydantic_settings', 'core.builtin_keys', 'psutil']
 tmp_ret = collect_all('webview')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('pythonnet')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('clr_loader')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('faster_whisper')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('ctranslate2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('huggingface_hub')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('moviepy')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('imageio')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -29,7 +31,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['matplotlib', 'IPython', 'jupyter', 'tkinter', 'PySide6', 'PyQt5', 'funasr', 'torchaudio', 'torch', 'whisper', 'dashscope'],
+    excludes=['matplotlib', 'IPython', 'jupyter', 'tkinter', 'PySide6', 'PyQt5', 'funasr', 'torchaudio', 'torch', 'whisper', 'dashscope', 'moviepy'],
     noarchive=False,
     optimize=0,
 )

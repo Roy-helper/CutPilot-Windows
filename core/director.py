@@ -310,13 +310,30 @@ async def generate_versions(
         f"{numbered_text}"
     )
 
-    raw_text = await asyncio.to_thread(
-        _call_llm, config, system_prompt, user_prompt
-    )
+    max_retries = 3
+    last_error: Exception | None = None
+    versions: list[ScriptVersion] = []
 
-    logger.info("AI raw response (first 2000 chars): %s", raw_text[:2000])
+    for attempt in range(max_retries):
+        effective_prompt = user_prompt
+        if attempt > 0:
+            effective_prompt += "\n\n请严格返回 JSON 格式，不要包含任何额外文字。"
+            logger.info("AI JSON retry attempt %d/%d", attempt + 1, max_retries)
 
-    versions = parse_json_versions(raw_text)
+        raw_text = await asyncio.to_thread(
+            _call_llm, config, system_prompt, effective_prompt,
+        )
+        logger.info("AI raw response (first 2000 chars): %s", raw_text[:2000])
+
+        try:
+            versions = parse_json_versions(raw_text)
+            break  # success
+        except ValueError as exc:
+            last_error = exc
+            logger.warning("JSON parse failed (attempt %d/%d): %s", attempt + 1, max_retries, exc)
+
+    if not versions:
+        raise last_error or ValueError("AI 未返回有效脚本版本")
 
     sentence_map = {s.id: s for s in sentences}
     enriched = _enrich_with_duration(versions, sentence_map)

@@ -65,6 +65,15 @@ async def process_video(
                 error=f"素材太短（{len(sentences)}句，需要至少{config.min_sentences}句）",
             )
 
+        # Export SRT subtitle alongside output
+        try:
+            base_output = Path(config.output_dir).expanduser() if config.output_dir else video_path.parent / "output"
+            srt_dir = base_output / video_path.stem
+            srt_dir.mkdir(parents=True, exist_ok=True)
+            export_srt(sentences, srt_dir / f"{video_path.stem}.srt")
+        except Exception:
+            logger.warning("SRT export failed, continuing", exc_info=True)
+
         # Step 2: Director
         if cancel_event and cancel_event.is_set():
             return ProcessResult(success=False, error="用户取消处理")
@@ -86,6 +95,7 @@ async def process_video(
             return ProcessResult(success=False, error="用户取消处理")
         output_files = await _run_editor(
             video_path, approved, sentences, config, cache, on_progress,
+            cancel_event=cancel_event,
         )
 
         _report_progress(on_progress, "完成", 100)
@@ -100,8 +110,52 @@ async def process_video(
 
 
 # ---------------------------------------------------------------------------
+# SRT subtitle export
+# ---------------------------------------------------------------------------
+
+
+def _format_srt_time(seconds: float) -> str:
+    """Format seconds as SRT timestamp: HH:MM:SS,mmm."""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int((seconds - int(seconds)) * 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def export_srt(sentences: list[Sentence], output_path: Path) -> None:
+    """Write ASR sentences as an SRT subtitle file."""
+    lines: list[str] = []
+    for i, s in enumerate(sentences, 1):
+        lines.append(str(i))
+        lines.append(f"{_format_srt_time(s.start_sec)} --> {_format_srt_time(s.end_sec)}")
+        lines.append(s.text.strip())
+        lines.append("")
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("SRT exported: %s (%d entries)", output_path, len(sentences))
+
+
+# ---------------------------------------------------------------------------
 # Stage runners with caching
 # ---------------------------------------------------------------------------
+
+
+def _has_audio_stream(video_path: Path) -> bool:
+    """Check if the video file contains an audio stream via ffprobe."""
+    import json
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json",
+             "-show_streams", "-select_streams", "a", str(video_path)],
+            capture_output=True, timeout=15,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout.decode())
+            return len(data.get("streams", [])) > 0
+    except Exception:
+        pass
+    return False
 
 
 async def _run_asr(
@@ -118,6 +172,10 @@ async def _run_asr(
         logger.info("Loading ASR from cache")
         raw = cache.load(video_path, "asr")
         return [Sentence(**s) for s in raw]
+
+    # Check for audio stream before running ASR
+    if not _has_audio_stream(video_path):
+        raise RuntimeError("该视频无音频轨道，无法进行语音识别")
 
     from core.asr import transcribe_video
 
@@ -203,13 +261,17 @@ async def _run_editor(
     config: CutPilotConfig,
     cache: CacheManager,
     on_progress: Callable[[str, int], None] | None,
+    cancel_event: threading.Event | None = None,
 ) -> list[dict]:
     """Run editor (no caching — always regenerate video files)."""
     _report_progress(on_progress, "正在剪辑视频...", 70)
 
     from core.editor import cut_versions
 
-    output_files = await cut_versions(video_path, approved, sentences, config)
+    output_files = await cut_versions(
+        video_path, approved, sentences, config,
+        cancel_event=cancel_event,
+    )
     logger.info("Editor complete: %d output files", len(output_files))
     _report_progress(on_progress, f"剪辑完成，{len(output_files)} 个文件", 95)
     return output_files
@@ -287,6 +349,31 @@ async def process_batch(
     tasks = [_process_one(i, p) for i, p in enumerate(video_paths)]
     results = await asyncio.gather(*tasks)
     return list(results)
+
+
+def build_batch_summary(
+    paths: list[Path], results: list[ProcessResult],
+) -> dict:
+    """Build a summary of batch processing results.
+
+    Returns:
+        {"total": int, "success_count": int, "fail_count": int,
+         "errors": [{"video": str, "error": str}, ...]}
+    """
+    errors: list[dict[str, str]] = []
+    success_count = 0
+    for i, result in enumerate(results):
+        if result.success:
+            success_count += 1
+        else:
+            video_name = paths[i].name if i < len(paths) else f"video_{i}"
+            errors.append({"video": video_name, "error": result.error})
+    return {
+        "total": len(results),
+        "success_count": success_count,
+        "fail_count": len(results) - success_count,
+        "errors": errors,
+    }
 
 
 def generate_copy_text(versions: list[ScriptVersion]) -> str:

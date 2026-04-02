@@ -108,7 +108,6 @@ def build_pyinstaller(encrypted_core: Path) -> None:
         "webview", "bottle",
         "openai", "httpx", "httpcore",
         "pydantic", "pydantic_settings",
-        "moviepy",
         "PIL",
     ]
     for h in hidden:

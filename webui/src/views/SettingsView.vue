@@ -5,7 +5,7 @@ import TopBar from '@/components/TopBar.vue'
 import {
   getMachineId, getLicenseInfo, activateLicense, loadSettings, saveSettings as bridgeSave,
   getProviders as bridgeProviders, testConnection as bridgeTest,
-  selectDirectory, getEncoderInfo, getMaxParallel, checkAsrStatus, downloadAsrModel,
+  selectDirectory, getGpuInfo, getMaxParallel, checkAsrStatus, downloadAsrModel, onDownloadProgress, exportLogs,
   type ProviderPreset,
 } from '@/bridge'
 
@@ -51,10 +51,13 @@ const saveMsg = ref<string | null>(null)
 const saveMsgType = ref<'success' | 'error'>('success')
 const detectedEncoder = ref('自动检测中...')
 const detectedParallel = ref(0)
+const gpuIsHardware = ref(false)
 const asrEngine = ref('faster-whisper')
+const asrModelSize = ref('small')
 const asrModelReady = ref(false)
 const asrDownloading = ref(false)
 const asrDownloadMsg = ref('')
+const asrDownloadPercent = ref(0)
 const isDirty = ref(false)
 
 onMounted(async () => {
@@ -80,13 +83,21 @@ onMounted(async () => {
     if (s.generate_fast != null) generateFast.value = s.generate_fast as boolean
     if (s.enable_hook_overlay != null) enableHook.value = s.enable_hook_overlay as boolean
     if (s.asr_engine) asrEngine.value = s.asr_engine as string
+    if (s.asr_model_size) asrModelSize.value = s.asr_model_size as string
     if (s.enable_speaker_diarization != null) enableDiarization.value = s.enable_speaker_diarization as boolean
     if (s.hook_duration != null) hookDuration.value = s.hook_duration as number
   } catch { /* dev mode */ }
 
   try {
-    const enc = await getEncoderInfo()
-    detectedEncoder.value = enc.is_hardware ? `${enc.name} (${enc.codec})` : `${enc.name}`
+    const gpu = await getGpuInfo()
+    gpuIsHardware.value = gpu.is_hardware
+    if (gpu.is_hardware && gpu.gpu_model) {
+      detectedEncoder.value = `${gpu.encoder_name} (${gpu.gpu_model})`
+    } else if (gpu.is_hardware) {
+      detectedEncoder.value = `${gpu.encoder_name} (${gpu.encoder_codec})`
+    } else {
+      detectedEncoder.value = `CPU (${gpu.encoder_codec})`
+    }
     detectedParallel.value = await getMaxParallel()
   } catch { /* dev mode */ }
 
@@ -101,7 +112,7 @@ onMounted(async () => {
   watch(
     [provider, apiKey, maxVersions, minSentences, quality,
      generateFast, enableHook, enableDiarization, hookDuration, hotwords,
-     outputDir, asrEngine],
+     outputDir, asrEngine, asrModelSize],
     () => { isDirty.value = true },
   )
 })
@@ -140,11 +151,27 @@ async function handleActivate() {
 
 async function handleAsrDownload() {
   asrDownloading.value = true
+  asrDownloadPercent.value = 0
   asrDownloadMsg.value = '正在下载语音模型...'
-  const res = await downloadAsrModel(asrEngine.value)
-  asrDownloadMsg.value = res.message
-  asrModelReady.value = res.success
-  asrDownloading.value = false
+  const removeListener = onDownloadProgress((e) => {
+    asrDownloadPercent.value = e.percent
+    asrDownloadMsg.value = `正在下载语音模型... ${e.percent}%`
+  })
+  try {
+    const res = await downloadAsrModel(asrEngine.value)
+    asrDownloadMsg.value = res.message
+    asrModelReady.value = res.success
+  } finally {
+    removeListener()
+    asrDownloading.value = false
+  }
+}
+
+async function handleExportLogs() {
+  const res = await exportLogs()
+  saveMsg.value = res.message
+  saveMsgType.value = res.success ? 'success' : 'error'
+  setTimeout(() => { saveMsg.value = null }, 3000)
 }
 
 async function handleEngineChange() {
@@ -173,6 +200,7 @@ async function saveAllSettings() {
       min_sentences: minSentences.value,
       video_quality: qualityToBackend[quality.value] ?? 'standard',
       asr_engine: asrEngine.value,
+      asr_model_size: asrModelSize.value,
       hotwords: hotwords.value,
       output_dir: outputDir.value,
       generate_fast: generateFast.value,
@@ -295,6 +323,19 @@ async function browseOutputDir() {
                 <option value="funasr">FunASR (中文增强, 需下载 2GB+)</option>
               </select>
             </div>
+            <!-- ASR model size (faster-whisper only) -->
+            <div v-if="asrEngine === 'faster-whisper'" class="space-y-2">
+              <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">模型大小</label>
+              <div class="flex gap-2 p-1 bg-surface-container-highest rounded-lg">
+                <button
+                  v-for="sz in [{id:'tiny',label:'Tiny (快速)'},{id:'small',label:'Small (默认)'},{id:'medium',label:'Medium (精准)'}]"
+                  :key="sz.id"
+                  class="flex-1 py-2 text-xs font-bold rounded-md transition-all"
+                  :class="asrModelSize === sz.id ? 'bg-white shadow-sm text-primary' : ''"
+                  @click="asrModelSize = sz.id"
+                >{{ sz.label }}</button>
+              </div>
+            </div>
             <!-- ASR model status -->
             <div class="flex justify-between items-center py-2 border-b border-outline-variant/10">
               <span class="text-sm font-medium">语音模型</span>
@@ -309,7 +350,13 @@ async function browseOutputDir() {
                 >{{ asrDownloading ? '下载中...' : asrEngine === 'funasr' ? '下载 FunASR (~2GB)' : '下载 (461MB)' }}</button>
               </div>
             </div>
-            <p v-if="asrDownloadMsg" class="text-xs" :class="asrModelReady ? 'text-green-600' : 'text-error'">{{ asrDownloadMsg }}</p>
+            <!-- Download progress bar -->
+            <div v-if="asrDownloading && asrDownloadPercent > 0" class="mt-1">
+              <div class="bg-surface-container-highest rounded-full h-1.5 w-full overflow-hidden">
+                <div class="bg-primary h-full transition-all duration-500" :style="{ width: asrDownloadPercent + '%' }"></div>
+              </div>
+            </div>
+            <p v-if="asrDownloadMsg" class="text-xs whitespace-pre-line" :class="asrModelReady ? 'text-green-600' : 'text-error'">{{ asrDownloadMsg }}</p>
 
             <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">专有热词输入 (Hotwords)</label>
             <textarea
@@ -415,7 +462,7 @@ async function browseOutputDir() {
             <div class="space-y-2">
               <label class="block text-[10px] uppercase font-bold text-outline tracking-wider">导出引擎</label>
               <div class="flex items-center gap-2 bg-surface-container-highest rounded-md py-2 px-4 text-sm text-on-surface-variant">
-                <span class="material-symbols-outlined text-primary text-base">auto_awesome</span>
+                <span class="w-2 h-2 rounded-full" :class="gpuIsHardware ? 'bg-green-500 shadow-[0_0_4px_#22c55e]' : 'bg-yellow-500 shadow-[0_0_4px_#eab308]'"></span>
                 <span>{{ detectedEncoder }}</span>
                 <span v-if="detectedParallel > 0" class="text-[10px] text-outline ml-auto">并行 {{ detectedParallel }} 路</span>
               </div>
@@ -501,10 +548,19 @@ async function browseOutputDir() {
         </div>
 
         <!-- Save -->
-        <div class="flex justify-end items-center gap-4 pt-6">
-          <span v-if="saveMsg" class="text-sm font-semibold transition-opacity" :class="saveMsgType === 'success' ? 'text-green-600' : 'text-error'">{{ saveMsg }}</span>
-          <button class="px-8 py-3 text-sm font-bold text-on-surface-variant hover:text-on-surface transition-colors" @click="resetToDefaults">恢复默认</button>
-          <button class="px-12 py-3 bg-primary text-white font-bold text-sm rounded-xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all" :class="{ 'opacity-50': saving }" @click="saveAllSettings">{{ saving ? '保存中...' : '保存全部更改' }}</button>
+        <div class="flex justify-between items-center pt-6">
+          <button
+            class="px-4 py-2 text-xs font-medium text-on-surface-variant hover:text-primary hover:bg-primary-fixed/10 rounded-lg transition-all flex items-center gap-1.5"
+            @click="handleExportLogs"
+          >
+            <span class="material-symbols-outlined text-sm">download</span>
+            导出日志
+          </button>
+          <div class="flex items-center gap-4">
+            <span v-if="saveMsg" class="text-sm font-semibold transition-opacity" :class="saveMsgType === 'success' ? 'text-green-600' : 'text-error'">{{ saveMsg }}</span>
+            <button class="px-8 py-3 text-sm font-bold text-on-surface-variant hover:text-on-surface transition-colors" @click="resetToDefaults">恢复默认</button>
+            <button class="px-12 py-3 bg-primary text-white font-bold text-sm rounded-xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all" :class="{ 'opacity-50': saving }" @click="saveAllSettings">{{ saving ? '保存中...' : '保存全部更改' }}</button>
+          </div>
         </div>
       </div>
     </div>

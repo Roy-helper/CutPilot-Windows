@@ -7,13 +7,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sys
 import threading
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import webview
 
-logging.basicConfig(level=logging.INFO)
+# ── Logging setup: console + rotating file ──────────────────
+_LOG_DIR = Path.home() / ".cutpilot" / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_LOG_FILE = _LOG_DIR / "cutpilot.log"
+
+_file_handler = TimedRotatingFileHandler(
+    str(_LOG_FILE), when="midnight", backupCount=7, encoding="utf-8",
+)
+_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+))
+logging.basicConfig(level=logging.INFO, handlers=[
+    logging.StreamHandler(),
+    _file_handler,
+])
 logger = logging.getLogger(__name__)
 
 # Fix SSL certificates for PyInstaller on macOS
@@ -85,6 +102,25 @@ class PythonBridge:
         from core.hwaccel import benchmark_parallel
         return benchmark_parallel()
 
+    def get_gpu_info(self) -> dict:
+        """Return GPU diagnostic info for frontend display."""
+        from core.hwaccel import diagnose_gpu
+        return diagnose_gpu()
+
+    # ── Logs ────────────────────────────────────────────────
+
+    def export_logs(self) -> dict:
+        """Copy log file to user's Desktop for easy sharing."""
+        try:
+            desktop = Path.home() / "Desktop"
+            dest = desktop / "cutpilot_logs.log"
+            if _LOG_FILE.exists():
+                shutil.copy2(str(_LOG_FILE), str(dest))
+                return {"success": True, "message": f"日志已导出到桌面: {dest.name}", "path": str(dest)}
+            return {"success": False, "message": "暂无日志文件"}
+        except Exception as e:
+            return {"success": False, "message": f"导出失败: {e}"}
+
     # ── ASR Status ───────────────────────────────────────────
 
     def check_asr_status(self, engine: str = "") -> dict:
@@ -112,8 +148,16 @@ class PythonBridge:
             if not engine:
                 from core.user_settings import load_user_settings
                 engine = load_user_settings().get("asr_engine", "faster-whisper")
+
+            def on_progress(percent: int) -> None:
+                if self._window:
+                    self._window.evaluate_js(
+                        f'window.dispatchEvent(new CustomEvent("download-progress", '
+                        f'{{detail: {{percent: {percent}}}}}))'
+                    )
+
             from core.asr import download_model
-            return download_model(engine=engine)
+            return download_model(engine=engine, on_progress=on_progress)
         except Exception as e:
             logger.exception("模型下载失败")
             return {"success": False, "message": f"下载失败: {e}"}
@@ -398,6 +442,17 @@ class PythonBridge:
                 add_history_entry(entry)
                 result_dicts.append(result.model_dump())
 
+            # Send batch summary event to frontend
+            if self._window:
+                from core.pipeline import build_batch_summary
+                summary = build_batch_summary(paths, results)
+                import json as _json
+                summary_js = _json.dumps(summary, ensure_ascii=False)
+                self._window.evaluate_js(
+                    f'window.dispatchEvent(new CustomEvent("batch-summary", '
+                    f'{{detail: {summary_js}}}))'
+                )
+
             return result_dicts
         except Exception as e:
             logger.exception("Batch pipeline error")
@@ -581,9 +636,40 @@ def _start_bottle_server(api: PythonBridge, port: int = 18989) -> None:
     app.run(host="localhost", port=port, quiet=True)
 
 
+def _check_ffmpeg() -> bool:
+    """Check if ffmpeg is available in PATH. Show dialog if missing."""
+    import subprocess as _sp
+    try:
+        _sp.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
+        return True
+    except FileNotFoundError:
+        logger.error("FFmpeg not found in PATH")
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    "未检测到 FFmpeg，CutPilot 需要 FFmpeg 才能处理视频。\n\n"
+                    "请下载安装后重启：\n"
+                    "https://www.gyan.dev/ffmpeg/builds/\n\n"
+                    "下载 ffmpeg-release-essentials.zip，解压后将 bin 目录\n"
+                    "添加到系统 PATH 环境变量。",
+                    "CutPilot — 缺少 FFmpeg",
+                    0x00000010,  # MB_ICONERROR
+                )
+            except Exception:
+                pass
+        return False
+    except Exception:
+        return True  # ffmpeg exists but some other error, let it pass
+
+
 def main():
     if not _DIST_DIR.exists():
         logger.error("Web UI not built. Run: npm --prefix webui run build")
+        sys.exit(1)
+
+    if not _check_ffmpeg():
         sys.exit(1)
 
     api = PythonBridge()

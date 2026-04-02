@@ -14,13 +14,13 @@ from core.config import CutPilotConfig
 
 def create_openai_client(
     config: CutPilotConfig | None = None,
-    timeout: float = 300.0,
+    timeout: float | None = None,
 ) -> OpenAI:
     """Create an OpenAI client configured for DashScope.
 
     Args:
         config: CutPilot configuration. Auto-loaded if None.
-        timeout: Request timeout in seconds.
+        timeout: Request timeout in seconds. If None, uses config.ai_timeout.
 
     Returns:
         Configured OpenAI client instance.
@@ -28,9 +28,11 @@ def create_openai_client(
     if config is None:
         config = CutPilotConfig()
 
+    effective_timeout = timeout if timeout is not None else config.ai_timeout
+
     http_client = httpx.Client(
         trust_env=False,
-        timeout=httpx.Timeout(timeout, connect=30.0),
+        timeout=httpx.Timeout(effective_timeout, connect=30.0),
     )
 
     return OpenAI(

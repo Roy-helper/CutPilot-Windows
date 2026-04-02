@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import TopBar from '@/components/TopBar.vue'
 import { getHistory, clearHistory as bridgeClear, openFolder, deleteHistoryEntry, type HistoryEntry } from '@/bridge'
 import { useNotificationStore } from '@/stores/notifications'
@@ -18,6 +19,7 @@ interface HistoryRecord {
   tags: string[]
 }
 
+const router = useRouter()
 const records = ref<HistoryRecord[]>([])
 const notify = useNotificationStore()
 
@@ -275,8 +277,16 @@ const filterLabel = computed(() => {
         </thead>
         <tbody class="divide-y divide-surface-container">
           <tr v-if="filteredRecords.length === 0">
-            <td colspan="6" class="px-6 py-12 text-center text-sm text-on-surface-variant">
-              {{ records.length === 0 ? '暂无记录' : '无匹配结果' }}
+            <td colspan="6" class="px-6 py-16 text-center">
+              <div v-if="records.length === 0" class="flex flex-col items-center gap-3">
+                <span class="material-symbols-outlined text-4xl text-on-surface-variant/30">movie_edit</span>
+                <p class="text-sm text-on-surface-variant/60">还没有处理记录</p>
+                <button
+                  class="mt-1 px-4 py-2 text-xs font-bold text-primary bg-primary-fixed/20 rounded-lg hover:bg-primary-fixed/30 transition-colors"
+                  @click="router.push('/')"
+                >去工作台导入视频</button>
+              </div>
+              <p v-else class="text-sm text-on-surface-variant">无匹配结果</p>
             </td>
           </tr>
           <tr
