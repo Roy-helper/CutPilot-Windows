@@ -106,7 +106,30 @@ async def process_video(
         )
     except Exception as exc:
         logger.exception("Pipeline failed for %s", video_path)
-        return ProcessResult(success=False, error=str(exc))
+        return ProcessResult(success=False, error=friendly_error(str(exc)))
+
+
+def friendly_error(raw: str) -> str:
+    """Translate common technical errors to user-friendly Chinese messages."""
+    low = raw.lower()
+    mappings = [
+        (["no such file", "filenotfounderror", "文件不存在"],
+         "文件不存在或路径无效，请确认文件位置"),
+        (["encoder", "codec", "h264_nvenc", "h264_qsv", "h264_amf"],
+         "视频编码器不可用，请检查 FFmpeg 安装或切换到 CPU 编码"),
+        (["out of memory", "memoryerror", "oom", "cannot allocate"],
+         "内存不足，请关闭其他程序后重试，或减少并行处理数"),
+        (["timeout", "timed out", "connect", "connectionerror"],
+         "网络连接超时，请检查网络后重试"),
+        (["auth", "api key", "401", "invalid_api_key", "incorrect api key"],
+         "API Key 无效或已过期，请在设置页重新填写"),
+        (["无音频", "no audio"],
+         "该视频无音频轨道，无法进行语音识别"),
+    ]
+    for keywords, msg in mappings:
+        if any(kw in low for kw in keywords):
+            return msg
+    return raw
 
 
 # ---------------------------------------------------------------------------

@@ -68,6 +68,7 @@ const notifyTypeColor: Record<string, string> = {
       <div class="relative notify-panel-root">
         <button
           class="p-2 text-on-surface-variant hover:bg-surface-container-high rounded-full transition-colors relative"
+          title="通知"
           @click="notify.toggle()"
         >
           <span class="material-symbols-outlined">notifications</span>
@@ -120,6 +121,7 @@ const notifyTypeColor: Record<string, string> = {
       <div class="relative">
         <button
           class="p-2 text-on-surface-variant hover:bg-surface-container-high rounded-full transition-colors"
+          title="账户"
           @click="showAccountMenu = !showAccountMenu"
           @blur="closeMenuDelayed"
         >

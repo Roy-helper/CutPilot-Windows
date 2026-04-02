@@ -134,7 +134,7 @@ C:\CutPilot-Windows/
 6. **默认画质 4K** — 用户可在设置页调整
 7. **HuggingFace 被墙** — 模型下载走 hf-mirror.com
 
-## 当前版本 v4.2 已完成功能
+## 当前版本 v4.2.1 已完成功能
 
 ### 基础功能
 - 视频缩略图预览 (ffmpeg 抓帧)
@@ -179,9 +179,14 @@ C:\CutPilot-Windows/
 - 音频归一化 — FFmpeg loudnorm filter，统一 -14 LUFS (抖音标准)
 - ASR 模型大小可选 — 设置页 tiny(快速)/small(默认)/medium(精准) 三档
 
+### v4.2.1 体验打磨 (3项)
+- API Key 连通性测试 — 测试连接显示延迟(ms)，错误分类(Key无效/超时/模型不存在)
+- 错误信息友好化 — 6 类技术错误自动翻译为中文提示(文件不存在/编码器/内存/网络/API Key/无音频)
+- 图标 tooltip — 所有 icon-only 按钮加 title 悬停提示(通知/账户/预览/复制/选中等)
+
 ## 测试覆盖
 
-- **191 个测试**，全部通过
+- **198 个测试**，全部通过
 - **覆盖率 63%** (core/ 模块)
 - 100% 覆盖: models, config, cache_manager, history, category_detector, providers
 - 90%+ 覆盖: pipeline (96%), ai_client (95%), user_settings (92%), paths (91%)

@@ -304,7 +304,7 @@ const fileStatusDot: Record<string, string> = {
           class="group relative bg-surface-container-lowest rounded-xl overflow-hidden hover:shadow-2xl hover:shadow-on-surface/5 transition-all duration-300"
         >
           <div class="absolute top-3 left-3 z-10">
-            <input v-model="ver.selected" class="w-4 h-4 rounded-md border-outline-variant text-primary focus:ring-primary cursor-pointer" type="checkbox" />
+            <input v-model="ver.selected" class="w-4 h-4 rounded-md border-outline-variant text-primary focus:ring-primary cursor-pointer" type="checkbox" title="选中导出" />
           </div>
           <div class="absolute top-3 right-3 z-10">
             <span class="px-2 py-0.5 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold rounded-full border border-white/20">时长 {{ ver.duration }}</span>
@@ -314,7 +314,7 @@ const fileStatusDot: Record<string, string> = {
             <img v-if="ver.thumbnail" :src="ver.thumbnail" class="w-full h-full object-cover" alt="" />
             <span v-else class="material-symbols-outlined text-4xl text-on-surface-variant/30">movie</span>
             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <button class="p-3 bg-white/20 backdrop-blur-xl rounded-full text-white hover:bg-white/40 transition-colors" @click.stop="store.preview(ver)">
+              <button class="p-3 bg-white/20 backdrop-blur-xl rounded-full text-white hover:bg-white/40 transition-colors" title="预览视频" @click.stop="store.preview(ver)">
                 <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
               </button>
             </div>
@@ -370,6 +370,6 @@ const fileStatusDot: Record<string, string> = {
         <span class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">并行: 最多 {{ store.maxParallel }} 路</span>
       </div>
     </div>
-    <p class="text-[10px] font-medium text-on-surface-variant/60 uppercase tracking-[0.2em]">CutPilot v4.2</p>
+    <p class="text-[10px] font-medium text-on-surface-variant/60 uppercase tracking-[0.2em]">CutPilot v4.2.1</p>
   </footer>
 </template>

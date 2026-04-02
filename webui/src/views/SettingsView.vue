@@ -185,7 +185,7 @@ async function handleEngineChange() {
 async function testConnection() {
   testResult.value = '测试中...'
   const res = await bridgeTest(provider.value, apiKey.value)
-  testResult.value = res.success ? `连接成功 (${res.model})` : `失败: ${res.error}`
+  testResult.value = res.success ? `✅ 连接成功（延迟 ${res.latency_ms ?? '?'}ms）` : `❌ ${res.error}`
   setTimeout(() => { testResult.value = null }, 5000)
 }
 
@@ -270,7 +270,7 @@ async function browseOutputDir() {
               <label class="block text-[10px] uppercase font-bold text-outline tracking-wider mb-2">机器码 (Hardware ID)</label>
               <div class="bg-surface-container-highest font-mono text-xs p-3 rounded-md flex justify-between items-center group">
                 <span class="truncate">{{ machineId }}</span>
-                <button class="opacity-0 group-hover:opacity-100 transition-opacity" @click="copyMachineId">
+                <button class="opacity-0 group-hover:opacity-100 transition-opacity" title="复制机器码" @click="copyMachineId">
                   <span class="material-symbols-outlined text-sm">content_copy</span>
                 </button>
               </div>
@@ -380,7 +380,7 @@ async function browseOutputDir() {
               <h3 class="font-semibold text-sm uppercase tracking-widest text-on-surface-variant">AI 模型配置</h3>
             </div>
             <div class="flex items-center gap-3">
-              <span v-if="testResult" class="text-xs font-medium" :class="testResult.startsWith('连接') ? 'text-green-600' : testResult === '测试中...' ? 'text-primary' : 'text-error'">{{ testResult }}</span>
+              <span v-if="testResult" class="text-xs font-medium" :class="testResult.startsWith('✅') ? 'text-green-600' : testResult === '测试中...' ? 'text-primary' : 'text-error'">{{ testResult }}</span>
               <button class="text-xs font-bold text-primary flex items-center gap-1 hover:underline" @click="testConnection">
                 <span class="material-symbols-outlined text-sm">bolt</span> 测试连接
               </button>

@@ -17,3 +17,4 @@ models/
 core/builtin_keys.py
 node_modules/
 webui/node_modules/
+.coverage

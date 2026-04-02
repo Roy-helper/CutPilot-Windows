@@ -110,7 +110,7 @@ function skipTrial() {
 
       <!-- Footer -->
       <div class="px-10 py-4 bg-surface-container-low text-center">
-        <p class="text-[10px] text-on-surface-variant/50">CutPilot v4.2 · 如需帮助请联系管理员</p>
+        <p class="text-[10px] text-on-surface-variant/50">CutPilot v4.2.1 · 如需帮助请联系管理员</p>
       </div>
     </div>
   </div>

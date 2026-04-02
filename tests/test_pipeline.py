@@ -10,7 +10,8 @@ from core.models import ProcessResult, ScriptVersion, Sentence
 from core.pipeline import (
     _format_srt_time, _has_audio_stream, _report_progress, _run_asr,
     _run_director, _run_editor, _run_inspector, build_batch_summary,
-    export_srt, generate_copy_text, process_batch, process_video,
+    export_srt, friendly_error, generate_copy_text, process_batch,
+    process_video,
 )
 
 
@@ -508,6 +509,29 @@ class TestNoAudioDetection:
         assert "无音频" in result.error
 
 
+class TestFriendlyError:
+    def test_file_not_found(self):
+        assert "文件不存在" in friendly_error("FileNotFoundError: no such file")
+
+    def test_encoder_error(self):
+        assert "编码器" in friendly_error("Unknown encoder 'h264_nvenc'")
+
+    def test_memory_error(self):
+        assert "内存不足" in friendly_error("MemoryError: out of memory")
+
+    def test_timeout_error(self):
+        assert "网络" in friendly_error("ConnectionError: timed out")
+
+    def test_api_key_error(self):
+        assert "API Key" in friendly_error("Error code: 401 - Invalid API Key")
+
+    def test_no_audio(self):
+        assert "无音频" in friendly_error("该视频无音频轨道，无法进行语音识别")
+
+    def test_unknown_error_passthrough(self):
+        assert friendly_error("some random error") == "some random error"
+
+
 class TestSrtExport:
     def test_format_srt_time(self):
         assert _format_srt_time(0.0) == "00:00:00,000"
@@ -569,9 +593,9 @@ class TestProcessVideoEdgeCases:
         video.write_bytes(b"fake")
         cache = CacheManager(base_dir=tmp_path / "cache")
 
-        with patch("core.pipeline._run_asr", new_callable=AsyncMock, side_effect=RuntimeError("ASR boom")):
+        with patch("core.pipeline._run_asr", new_callable=AsyncMock, side_effect=RuntimeError("处理异常")):
             config = _make_config(min_sentences=15)
             result = await process_video(video, config, cache=cache)
 
         assert result.success is False
-        assert "ASR boom" in result.error
+        assert "处理异常" in result.error

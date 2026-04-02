@@ -275,15 +275,29 @@ class PythonBridge:
         mdl = model or (preset.model if preset else "")
 
         try:
-            client = OpenAI(api_key=api_key, base_url=url)
+            import time as _time
+            import httpx
+            client = OpenAI(
+                api_key=api_key, base_url=url,
+                http_client=httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0)),
+            )
+            t0 = _time.monotonic()
             resp = client.chat.completions.create(
                 model=mdl,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=5,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
             )
-            return {"success": True, "model": mdl, "reply": resp.choices[0].message.content}
+            latency_ms = int((_time.monotonic() - t0) * 1000)
+            return {"success": True, "model": mdl, "latency_ms": latency_ms}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            err = str(e)
+            if "auth" in err.lower() or "api key" in err.lower() or "401" in err:
+                return {"success": False, "error": "API Key 无效，请检查后重试"}
+            if "connect" in err.lower() or "timeout" in err.lower():
+                return {"success": False, "error": "连接超时，请检查网络和 API 地址"}
+            if "404" in err:
+                return {"success": False, "error": f"模型 {mdl} 不存在，请检查模型名称"}
+            return {"success": False, "error": err[:200]}
 
     # ── Pipeline ────────────────────────────────────────────
 

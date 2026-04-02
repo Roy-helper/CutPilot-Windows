@@ -17,7 +17,7 @@ interface PyWebViewAPI {
   open_folder(path: string): Promise<{ success: boolean; error?: string }>
   get_history(): Promise<HistoryEntry[]>
   clear_history(): Promise<{ success: boolean; error?: string }>
-  test_connection(provider: string, apiKey: string, baseUrl?: string, model?: string): Promise<{ success: boolean; error?: string; model?: string }>
+  test_connection(provider: string, apiKey: string, baseUrl?: string, model?: string): Promise<{ success: boolean; error?: string; model?: string; latency_ms?: number }>
   process_batch(videoPaths: string[]): Promise<ProcessResult[]>
   cancel_processing(): Promise<{ success: boolean; error?: string }>
   export_versions(videoPath: string, versionIds: number[], options?: Record<string, unknown>): Promise<{ success: boolean; files?: unknown[]; error?: string }>
@@ -219,7 +219,7 @@ export async function clearHistory(): Promise<{ success: boolean; error?: string
 
 export async function testConnection(
   provider: string, apiKey: string, baseUrl?: string, model?: string
-): Promise<{ success: boolean; error?: string; model?: string }> {
+): Promise<{ success: boolean; error?: string; model?: string; latency_ms?: number }> {
   const api = await waitForApi()
   return api
     ? await api.test_connection(provider, apiKey, baseUrl ?? '', model ?? '')
