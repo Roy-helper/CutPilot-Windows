@@ -437,42 +437,154 @@ def _download_funasr_model() -> dict:
         return {"success": False, "message": f"下载失败: {err[:100]}"}
 
 
-def _get_fw_model():
-    """Lazy-load faster-whisper model (singleton, thread-safe)."""
-    global _fw_model
+# Track which model size is actually loaded so we can invalidate on change
+_fw_loaded_size: str | None = None
+_fw_auto_downgraded: bool = False
+
+
+def _detect_device_and_compute() -> tuple[str, str]:
+    """Detect the best device and compute type for faster-whisper.
+
+    Returns:
+        (device, compute_type) — e.g. ("cuda", "float16") or ("cpu", "int8").
+    """
+    try:
+        import ctranslate2
+        cuda_types = ctranslate2.get_supported_compute_types("cuda")
+        if cuda_types:  # non-empty set means CUDA is available
+            compute = "float16" if "float16" in cuda_types else "int8"
+            return "cuda", compute
+    except Exception:
+        pass
+    return "cpu", "int8"
+
+
+def _get_gpu_name_for_log() -> str:
+    """Best-effort GPU name for diagnostic logging."""
+    try:
+        import ctranslate2
+        cuda_types = ctranslate2.get_supported_compute_types("cuda")
+        if cuda_types:
+            try:
+                from core.subprocess_utils import run_hidden
+                r = run_hidden(
+                    ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    return r.stdout.strip().splitlines()[0]
+            except Exception:
+                pass
+            return "CUDA (unknown model)"
+    except Exception:
+        pass
+    return "none"
+
+
+def _get_fw_model(model_size: str = "small"):
+    """Lazy-load faster-whisper model (singleton, thread-safe).
+
+    Args:
+        model_size: "tiny", "small", or "medium".
+
+    Auto-downgrades medium → small when running on CPU (too slow otherwise).
+    Logs full diagnostics: model size, device, compute_type, GPU model.
+    """
+    global _fw_model, _fw_loaded_size, _fw_auto_downgraded
     with _fw_lock:
-        if _fw_model is not None:
+        # Return cached model if same size
+        if _fw_model is not None and _fw_loaded_size == model_size:
             return _fw_model
 
-        status = get_model_status()
+        # Detect device
+        device, compute_type = _detect_device_and_compute()
+        gpu_name = _get_gpu_name_for_log()
+
+        # Auto-downgrade: medium on CPU is extremely slow
+        _fw_auto_downgraded = False
+        actual_size = model_size
+        if device == "cpu" and model_size == "medium":
+            actual_size = "small"
+            _fw_auto_downgraded = True
+            logger.warning(
+                "ASR 自动降级: medium → small (CPU 运行 medium 模型过慢)"
+            )
+
+        status = get_model_status(model_size=actual_size)
         if not status["ready"]:
-            raise RuntimeError("语音模型未下载，请在设置页点击「下载语音模型」")
+            # If downgraded but small not downloaded either, try tiny
+            if _fw_auto_downgraded:
+                status = get_model_status(model_size="tiny")
+                if status["ready"]:
+                    actual_size = "tiny"
+                    logger.warning("small 模型也未下载，降级到 tiny")
+            if not status["ready"]:
+                raise RuntimeError("语音模型未下载，请在设置页点击「下载语音模型」")
+
+        # Log diagnostics
+        logger.info(
+            "ASR 诊断: model_size=%s, device=%s, compute_type=%s, gpu=%s, "
+            "model_path=%s",
+            actual_size, device, compute_type, gpu_name,
+            status["model_path"],
+        )
 
         try:
             from faster_whisper import WhisperModel
-            logger.info("加载语音模型...")
             _fw_model = WhisperModel(
                 status["model_path"],
-                device="cpu",
-                compute_type="int8",
+                device=device,
+                compute_type=compute_type,
             )
-            logger.info("语音模型加载完成")
+            _fw_loaded_size = actual_size
+            logger.info("语音模型加载完成 (%s, %s)", actual_size, device)
             return _fw_model
         except Exception as exc:
             logger.warning("语音模型加载失败: %s", exc)
-            return None
+            # If CUDA failed, fall back to CPU
+            if device == "cpu":
+                return None
+            logger.info("CUDA 加载失败，回退到 CPU")
+            try:
+                _fw_model = WhisperModel(
+                    status["model_path"],
+                    device="cpu",
+                    compute_type="int8",
+                )
+                _fw_loaded_size = actual_size
+                logger.info("语音模型加载完成 (%s, cpu fallback)", actual_size)
+                return _fw_model
+            except Exception as exc2:
+                logger.warning("CPU fallback 也失败: %s", exc2)
+                return None
 
 
-def _transcribe_faster_whisper(video_path: str) -> list[TranscriptSegment]:
-    """Transcribe using faster-whisper (local, no torch needed)."""
-    model = _get_fw_model()
+def _transcribe_faster_whisper(
+    video_path: str,
+    model_size: str = "small",
+    on_progress: Callable[[str, int], None] | None = None,
+) -> list[TranscriptSegment]:
+    """Transcribe using faster-whisper with streaming progress.
+
+    Args:
+        video_path: Path to video/audio file.
+        model_size: Model size to use (may be auto-downgraded).
+        on_progress: Optional callback ``(label, percent)`` for per-segment progress.
+    """
+    model = _get_fw_model(model_size)
     if model is None:
         raise RuntimeError("语音模型未就绪")
+
+    # If auto-downgraded, the caller should know
+    if _fw_auto_downgraded and on_progress:
+        on_progress("检测到无 GPU 加速，已自动切换至 small 模型提升速度", 10)
 
     segments_iter, info = model.transcribe(
         video_path, language="zh", vad_filter=True,
     )
 
+    # Stream segments with progress — estimate from audio duration
+    duration = info.duration if info.duration > 0 else 1.0
     segments: list[TranscriptSegment] = []
     for seg in segments_iter:
         text = seg.text.strip()
@@ -482,6 +594,10 @@ def _transcribe_faster_whisper(video_path: str) -> list[TranscriptSegment]:
                 end=seg.end,
                 text=text,
             ))
+            if on_progress:
+                # Map segment end time to 10%-28% range (ASR is 10-30 in pipeline)
+                pct = min(28, 10 + int((seg.end / duration) * 18))
+                on_progress(f"正在识别语音... ({len(segments)} 段)", pct)
     return segments
 
 
@@ -495,6 +611,8 @@ async def transcribe_video(
     hotwords: str = "",
     enable_diarization: bool = True,
     engine: str = "faster-whisper",
+    model_size: str = "small",
+    on_progress: Callable[[str, int], None] | None = None,
 ) -> list[TranscriptSegment]:
     """Transcribe video using the specified engine.
 
@@ -503,6 +621,8 @@ async def transcribe_video(
         hotwords: Space-separated hotwords (FunASR only).
         enable_diarization: Enable speaker detection (FunASR only).
         engine: "faster-whisper" (default, lightweight) or "funasr" (better Chinese).
+        model_size: Model size for faster-whisper: "tiny", "small", or "medium".
+        on_progress: Optional callback ``(label, percent)`` for streaming progress.
 
     Returns:
         List of TranscriptSegment objects.
@@ -525,7 +645,10 @@ async def transcribe_video(
         # faster-whisper path (default)
         try:
             import asyncio
-            result = await asyncio.to_thread(_transcribe_faster_whisper, video_path)
+            result = await asyncio.to_thread(
+                _transcribe_faster_whisper, video_path,
+                model_size=model_size, on_progress=on_progress,
+            )
             if result:
                 logger.info("语音识别完成 (Whisper): %d 段", len(result))
                 return result

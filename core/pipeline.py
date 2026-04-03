@@ -206,6 +206,8 @@ async def _run_asr(
         str(video_path), hotwords=hotwords,
         enable_diarization=config.enable_speaker_diarization,
         engine=getattr(config, "asr_engine", "faster-whisper"),
+        model_size=getattr(config, "asr_model_size", "small"),
+        on_progress=on_progress,
     )
     sentences = [
         Sentence(
