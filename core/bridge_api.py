@@ -514,13 +514,14 @@ class PythonBridge:
         """Extract a frame from video at given timestamp, return as base64 data URI."""
         import base64
         import os
-        import subprocess
         import tempfile
+
+        from core.subprocess_utils import run_hidden
 
         tmp = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
         tmp.close()
         try:
-            subprocess.run([
+            run_hidden([
                 'ffmpeg', '-y', '-ss', str(time_sec), '-i', video_path,
                 '-frames:v', '1', '-q:v', '3',
                 '-vf', 'scale=480:-1',

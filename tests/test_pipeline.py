@@ -479,18 +479,18 @@ class TestHasAudioStream:
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = b'{"streams": [{"codec_type": "audio"}]}'
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("core.subprocess_utils.subprocess.run", return_value=mock_result):
             assert _has_audio_stream(Path("/fake/video.mp4")) is True
 
     def test_without_audio(self):
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = b'{"streams": []}'
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("core.subprocess_utils.subprocess.run", return_value=mock_result):
             assert _has_audio_stream(Path("/fake/video.mp4")) is False
 
     def test_ffprobe_error_returns_false(self):
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+        with patch("core.subprocess_utils.subprocess.run", side_effect=FileNotFoundError):
             assert _has_audio_stream(Path("/fake/video.mp4")) is False
 
 

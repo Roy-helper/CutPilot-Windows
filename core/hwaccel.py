@@ -19,6 +19,8 @@ import sys
 
 from pydantic import BaseModel, Field
 
+from core.subprocess_utils import run_hidden
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -104,7 +106,7 @@ _QUALITY_CRF: dict[str, int] = {
 def _ffmpeg_has_encoder(grep_token: str) -> bool:
     """Return True if ``ffmpeg -encoders`` output contains *grep_token*."""
     try:
-        result = subprocess.run(
+        result = run_hidden(
             ["ffmpeg", "-encoders"],
             capture_output=True,
             text=True,
@@ -258,14 +260,14 @@ def _get_available_ram_gb() -> float:
     # Fallback: read from OS
     try:
         if sys.platform == "darwin":
-            result = subprocess.run(
+            result = run_hidden(
                 ["sysctl", "-n", "hw.memsize"],
                 capture_output=True, text=True, timeout=5,
             )
             total_bytes = int(result.stdout.strip())
             return total_bytes / (1024 ** 3) * 0.6  # assume 60% available
         elif sys.platform == "win32":
-            result = subprocess.run(
+            result = run_hidden(
                 ["wmic", "OS", "get", "FreePhysicalMemory"],
                 capture_output=True, text=True, timeout=5,
             )
@@ -281,7 +283,7 @@ def _get_available_ram_gb() -> float:
 def _get_gpu_name() -> str | None:
     """Query GPU model name via nvidia-smi. Returns None if unavailable."""
     try:
-        result = subprocess.run(
+        result = run_hidden(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             capture_output=True, text=True, timeout=5,
         )

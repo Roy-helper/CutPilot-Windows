@@ -217,23 +217,23 @@ class TestGetFpsModeFlag:
     def test_new_ffmpeg_uses_fps_mode(self):
         mock_result = MagicMock()
         mock_result.stdout = "ffmpeg version 6.1.2 Copyright (c) 2000-2024"
-        with patch("core.editor.subprocess.run", return_value=mock_result):
+        with patch("core.editor.run_hidden", return_value=mock_result):
             assert _get_fps_mode_flag() == ["-fps_mode", "cfr"]
 
     def test_old_ffmpeg_uses_vsync(self):
         mock_result = MagicMock()
         mock_result.stdout = "ffmpeg version 4.4.1 Copyright (c) 2000-2021"
-        with patch("core.editor.subprocess.run", return_value=mock_result):
+        with patch("core.editor.run_hidden", return_value=mock_result):
             assert _get_fps_mode_flag() == ["-vsync", "cfr"]
 
     def test_ffmpeg_5_1_uses_fps_mode(self):
         mock_result = MagicMock()
         mock_result.stdout = "ffmpeg version 5.1 Copyright (c) 2000-2022"
-        with patch("core.editor.subprocess.run", return_value=mock_result):
+        with patch("core.editor.run_hidden", return_value=mock_result):
             assert _get_fps_mode_flag() == ["-fps_mode", "cfr"]
 
     def test_ffmpeg_not_found_fallback(self):
-        with patch("core.editor.subprocess.run", side_effect=FileNotFoundError):
+        with patch("core.editor.run_hidden", side_effect=FileNotFoundError):
             assert _get_fps_mode_flag() == ["-vsync", "cfr"]
 
 
@@ -256,7 +256,7 @@ class TestCancelSupport:
         mock_proc.stderr = MagicMock()
         mock_proc.stderr.read.return_value = b""
 
-        with patch("core.editor.subprocess.Popen", return_value=mock_proc):
+        with patch("core.editor.popen_hidden", return_value=mock_proc):
             with pytest.raises(RuntimeError, match="取消"):
                 _run_ffmpeg_cmd(["ffmpeg", "-y"], cancel_event=cancel_event)
 
@@ -268,7 +268,7 @@ class TestCancelSupport:
         mock_result.returncode = 0
         mock_result.stderr = b""
 
-        with patch("core.editor.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("core.editor.run_hidden", return_value=mock_result) as mock_run:
             _run_ffmpeg_cmd(["ffmpeg", "-y"], cancel_event=None)
 
         mock_run.assert_called_once()

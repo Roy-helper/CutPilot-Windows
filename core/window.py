@@ -67,9 +67,9 @@ def start_bottle_server(api: PythonBridge, port: int = 18989) -> None:
 
 def check_ffmpeg() -> bool:
     """Check if ffmpeg is available in PATH. Show dialog if missing."""
-    import subprocess as _sp
+    from core.subprocess_utils import run_hidden
     try:
-        _sp.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
+        run_hidden(["ffmpeg", "-version"], capture_output=True, timeout=5)
         return True
     except FileNotFoundError:
         logger.error("FFmpeg not found in PATH")

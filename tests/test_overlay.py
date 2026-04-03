@@ -36,7 +36,7 @@ class TestProbeVideoDimensions:
         mock_result.stdout = b'{"streams": [{"width": 1920, "height": 1080}]}'
         mock_result.stderr = b""
 
-        with patch("core.overlay.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("core.overlay.run_hidden", return_value=mock_result) as mock_run:
             result = _probe_video_dimensions(Path("/fake/video.mp4"))
 
         assert result == {"width": 1920, "height": 1080}
@@ -53,7 +53,7 @@ class TestFfmpegOverlay:
         mock_result.stderr = b""
 
         with (
-            patch("core.overlay.subprocess.run", return_value=mock_result) as mock_run,
+            patch("core.overlay.run_hidden", return_value=mock_result) as mock_run,
             patch("core.editor._get_fps_mode_flag", return_value=["-fps_mode", "cfr"]),
         ):
             _ffmpeg_overlay(
@@ -81,7 +81,7 @@ class TestChinesePaths:
 
         with (
             patch("core.overlay.sys") as mock_sys,
-            patch("core.overlay.subprocess.run", return_value=mock_result) as mock_run,
+            patch("core.overlay.run_hidden", return_value=mock_result) as mock_run,
             patch("core.overlay.shutil.copy2") as mock_copy,
             patch("core.editor._get_fps_mode_flag", return_value=["-fps_mode", "cfr"]),
         ):
@@ -114,7 +114,7 @@ class TestChinesePaths:
 
         with (
             patch("core.overlay.sys") as mock_sys,
-            patch("core.overlay.subprocess.run", return_value=mock_result),
+            patch("core.overlay.run_hidden", return_value=mock_result),
             patch("core.overlay.shutil.copy2"),
             patch("core.overlay.shutil.move") as mock_move,
             patch("core.editor._get_fps_mode_flag", return_value=["-fps_mode", "cfr"]),
@@ -139,7 +139,7 @@ class TestChinesePaths:
 
         with (
             patch("core.overlay.sys") as mock_sys,
-            patch("core.overlay.subprocess.run", return_value=mock_result),
+            patch("core.overlay.run_hidden", return_value=mock_result),
             patch("core.overlay.shutil.copy2") as mock_copy,
         ):
             mock_sys.platform = "win32"

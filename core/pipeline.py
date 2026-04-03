@@ -166,9 +166,9 @@ def export_srt(sentences: list[Sentence], output_path: Path) -> None:
 def _has_audio_stream(video_path: Path) -> bool:
     """Check if the video file contains an audio stream via ffprobe."""
     import json
-    import subprocess
+    from core.subprocess_utils import run_hidden
     try:
-        result = subprocess.run(
+        result = run_hidden(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
              "-show_streams", "-select_streams", "a", str(video_path)],
             capture_output=True, timeout=15,

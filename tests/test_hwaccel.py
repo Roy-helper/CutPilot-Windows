@@ -18,25 +18,25 @@ class TestGetGpuName:
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "NVIDIA GeForce RTX 3060\n"
-        with patch("core.hwaccel.subprocess.run", return_value=mock_result):
+        with patch("core.hwaccel.run_hidden", return_value=mock_result):
             assert _get_gpu_name() == "NVIDIA GeForce RTX 3060"
 
     def test_nvidia_smi_not_found(self):
-        with patch("core.hwaccel.subprocess.run", side_effect=FileNotFoundError):
+        with patch("core.hwaccel.run_hidden", side_effect=FileNotFoundError):
             assert _get_gpu_name() is None
 
     def test_nvidia_smi_failure(self):
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stdout = ""
-        with patch("core.hwaccel.subprocess.run", return_value=mock_result):
+        with patch("core.hwaccel.run_hidden", return_value=mock_result):
             assert _get_gpu_name() is None
 
     def test_multi_gpu_returns_first(self):
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "NVIDIA GeForce RTX 4090\nNVIDIA GeForce RTX 3060\n"
-        with patch("core.hwaccel.subprocess.run", return_value=mock_result):
+        with patch("core.hwaccel.run_hidden", return_value=mock_result):
             assert _get_gpu_name() == "NVIDIA GeForce RTX 4090"
 
 
@@ -282,11 +282,11 @@ class TestEncoderFallbackChain:
     def test_ffmpeg_probe_timeout_returns_false(self):
         """_ffmpeg_has_encoder returns False on timeout."""
         import subprocess
-        with patch("core.hwaccel.subprocess.run",
+        with patch("core.hwaccel.run_hidden",
                    side_effect=subprocess.TimeoutExpired("ffmpeg", 5)):
             assert _ffmpeg_has_encoder("nvenc") is False
 
     def test_ffmpeg_not_installed_returns_false(self):
         """_ffmpeg_has_encoder returns False when ffmpeg is not found."""
-        with patch("core.hwaccel.subprocess.run", side_effect=FileNotFoundError):
+        with patch("core.hwaccel.run_hidden", side_effect=FileNotFoundError):
             assert _ffmpeg_has_encoder("nvenc") is False

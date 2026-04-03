@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from core.config import CutPilotConfig
+from core.subprocess_utils import popen_hidden, run_hidden
 from core.hwaccel import get_encoder_info, get_ffmpeg_params
 from core.models import ExportOptions, Sentence, ScriptVersion
 from core.overlay import burn_hook_overlay
@@ -336,7 +337,7 @@ def _get_fps_mode_flag() -> list[str]:
     if _cached_fps_mode_flag is not None:
         return list(_cached_fps_mode_flag)
     try:
-        result = subprocess.run(
+        result = run_hidden(
             ["ffmpeg", "-version"],
             capture_output=True, text=True, timeout=5,
         )
@@ -369,7 +370,7 @@ def _run_ffmpeg_cmd(
     """
     if cancel_event is None:
         # Simple blocking path (backward-compatible)
-        completed = subprocess.run(cmd, capture_output=True, timeout=600)
+        completed = run_hidden(cmd, capture_output=True, timeout=600)
         if completed.returncode != 0:
             error_msg = completed.stderr.decode(errors="replace").strip()
             if len(error_msg) > 500:
@@ -378,7 +379,7 @@ def _run_ffmpeg_cmd(
         return
 
     # Cancellable path: Popen + poll loop
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = popen_hidden(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         while process.poll() is None:
             if cancel_event.is_set():
@@ -413,7 +414,7 @@ def _validate_output(path: str) -> dict[str, Any]:
     if not Path(path).exists():
         raise FileNotFoundError(f"Output file not found: {path}")
 
-    completed = subprocess.run(
+    completed = run_hidden(
         ["ffprobe", "-v", "quiet", "-print_format", "json",
          "-show_format", "-show_streams", path],
         capture_output=True, timeout=30,
@@ -446,7 +447,7 @@ def _validate_output(path: str) -> dict[str, Any]:
 def _probe_duration(path: str) -> float:
     """Quick ffprobe to get source video duration in seconds."""
     try:
-        completed = subprocess.run(
+        completed = run_hidden(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
              "-show_format", path],
             capture_output=True, timeout=15,

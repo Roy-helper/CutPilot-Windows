@@ -13,6 +13,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from core.subprocess_utils import run_hidden
+
 from core.text_render import find_cjk_font, render_text_card
 
 logger = logging.getLogger(__name__)
@@ -155,7 +157,7 @@ def _ffmpeg_overlay(
             effective_output,
         ]
 
-        completed = subprocess.run(cmd, capture_output=True, timeout=300)
+        completed = run_hidden(cmd, capture_output=True, timeout=300)
         if completed.returncode != 0:
             error_msg = completed.stderr.decode(errors="replace").strip()
             if len(error_msg) > 500:
@@ -186,7 +188,7 @@ def _probe_video_dimensions(video_path: Path) -> dict[str, int]:
             shutil.copy2(effective_path, temp_probe)
             effective_path = temp_probe
 
-        completed = subprocess.run(
+        completed = run_hidden(
             ["ffprobe", "-v", "quiet",
              "-print_format", "json",
              "-show_streams",
