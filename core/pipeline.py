@@ -318,7 +318,7 @@ def _report_progress(
 async def process_batch(
     video_paths: list[Path],
     config: CutPilotConfig,
-    on_progress: Callable[[str, int, int], None] | None = None,
+    on_progress: Callable[[str, int, int, str], None] | None = None,
     cache: CacheManager | None = None,
     hotwords: str = "",
     max_parallel: int | None = None,
@@ -329,7 +329,7 @@ async def process_batch(
     Args:
         video_paths: List of video file paths to process.
         config: CutPilot configuration.
-        on_progress: Optional callback ``(video_name, video_index, percent)``.
+        on_progress: Optional callback ``(video_name, video_index, percent, stage_label)``.
         cache: Optional cache manager.
         hotwords: Hotwords for ASR.
         max_parallel: Max concurrent video jobs. If None, auto-detected
@@ -358,7 +358,7 @@ async def process_batch(
 
             def per_video_progress(label: str, percent: int) -> None:
                 if on_progress is not None:
-                    on_progress(video_name, index, percent)
+                    on_progress(video_name, index, percent, label)
 
             return await process_video(
                 video_path=vpath,

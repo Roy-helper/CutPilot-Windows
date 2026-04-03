@@ -19,6 +19,8 @@ export interface VideoFile {
   icon: string
   status: 'processing' | 'done' | 'pending' | 'error'
   statusLabel: string
+  stage: string       // pipeline stage label for queue panel
+  stagePercent: number // percent within current stage
   result?: ProcessResult
 }
 
@@ -89,6 +91,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         files.value.push({
           name, path: p, icon: 'video_library',
           status: 'pending', statusLabel: '待处理',
+          stage: '', stagePercent: 0,
         })
       }
     }
@@ -112,6 +115,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           files.value.push({
             name: f.name, path: fullPath, icon: 'video_library',
             status: 'pending', statusLabel: '待处理',
+            stage: '', stagePercent: 0,
           })
         }
       }
@@ -141,6 +145,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     for (const file of pending) {
       file.status = 'processing'
       file.statusLabel = '排队中...'
+      file.stage = '排队中'
+      file.stagePercent = 0
       file.icon = 'video_library'
     }
 
@@ -225,6 +231,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (file.status === 'processing') {
         file.status = 'pending'
         file.statusLabel = '已取消'
+        file.stage = ''
+        file.stagePercent = 0
       }
     }
     const notify = useNotificationStore()
@@ -274,9 +282,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     progressText.value = ''
   }
 
-  function updateFileProgress(index: number, label: string, percent: number) {
+  function updateFileProgress(index: number, label: string, percent: number, stage?: string) {
     const f = files.value[index]
-    if (f) f.statusLabel = `${label} ${percent}%`
+    if (f) {
+      f.statusLabel = `${label} ${percent}%`
+      if (stage) {
+        f.stage = stage
+        f.stagePercent = percent
+      }
+    }
   }
 
   async function preview(ver: Version) {
@@ -300,6 +314,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const failedFiles = computed(() => files.value.filter(f => f.status === 'error'))
+  const isBatchMode = computed(() => files.value.length > 1 && (isProcessing.value || files.value.some(f => f.status !== 'pending')))
+  const batchDoneCount = computed(() => files.value.filter(f => f.status === 'done').length)
+  const batchFailCount = computed(() => files.value.filter(f => f.status === 'error').length)
 
   async function retryFailed() {
     const failed = failedFiles.value
@@ -309,6 +326,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     for (const file of failed) {
       file.status = 'processing'
       file.statusLabel = '重试中...'
+      file.stage = '排队中'
+      file.stagePercent = 0
       file.icon = 'video_library'
     }
 
@@ -375,7 +394,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   return {
     files, versions, progress, progressText, isProcessing, isExporting,
     encoderName, maxParallel,
-    pendingFiles, failedFiles, selectedVersions, hasFiles, hasVersions,
+    pendingFiles, failedFiles, isBatchMode, batchDoneCount, batchFailCount,
+    selectedVersions, hasFiles, hasVersions,
     detectEncoder, importFiles, addDroppedFiles, generate, cancelGenerate,
     retryFailed, exportSelected, clear, updateFileProgress, preview, openOutputFolder,
   }

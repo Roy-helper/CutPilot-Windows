@@ -397,12 +397,13 @@ class PythonBridge:
             if "hotwords" in user_settings:
                 hotwords = user_settings["hotwords"]
 
-            def on_progress(video_name: str, index: int, percent: int) -> None:
+            def on_progress(video_name: str, index: int, percent: int, stage: str = "") -> None:
                 if self._window:
                     safe_name = video_name.replace('"', '\\"')
+                    safe_stage = stage.replace('"', '\\"')
                     js = (
                         f'window.dispatchEvent(new CustomEvent("pipeline-progress", '
-                        f'{{detail: {{label: "{safe_name}", percent: {percent}, index: {index}, total: {len(video_paths)}}}}}))'
+                        f'{{detail: {{label: "{safe_name}", percent: {percent}, index: {index}, total: {len(video_paths)}, stage: "{safe_stage}"}}}}))'
                     )
                     self._window.evaluate_js(js)
 

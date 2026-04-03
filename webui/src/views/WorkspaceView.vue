@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import TopBar from '@/components/TopBar.vue'
 import { onPipelineProgress, onBatchSummary } from '@/bridge'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -60,7 +60,7 @@ onMounted(async () => {
     } else if (e.label) {
       store.progressText = `${e.label} ${e.percent}%`
     }
-    if (e.index != null) store.updateFileProgress(e.index, e.label, e.percent)
+    if (e.index != null) store.updateFileProgress(e.index, e.label, e.percent, e.stage)
   })
   removeSummaryListener = onBatchSummary((summary) => {
     const n = useNotificationStore()
@@ -105,6 +105,38 @@ const fileStatusDot: Record<string, string> = {
   pending: 'bg-slate-400',
   error: 'bg-error',
 }
+
+// -- Batch queue panel helpers --
+
+const showQueuePanel = ref(false)
+
+// Auto-show queue when batch processing starts, keep visible after
+const _prevProcessing = ref(false)
+function checkQueueVisibility() {
+  if (store.isProcessing && store.files.length > 1 && !_prevProcessing.value) {
+    showQueuePanel.value = true
+  }
+  _prevProcessing.value = store.isProcessing
+}
+
+// Watch processing state reactively
+watch(() => store.isProcessing, checkQueueVisibility)
+
+function stageBadge(file: { status: string; stage: string }): { label: string; class: string } {
+  if (file.status === 'done') return { label: '完成', class: 'bg-green-500/15 text-green-700' }
+  if (file.status === 'error') return { label: '失败', class: 'bg-red-500/15 text-red-600' }
+  if (file.status === 'pending') return { label: '待处理', class: 'bg-slate-500/10 text-slate-500' }
+  // processing — parse stage
+  const s = file.stage
+  if (!s || s === '排队中') return { label: '排队中', class: 'bg-blue-500/15 text-blue-600' }
+  if (s.includes('识别') || s.includes('ASR')) return { label: 'ASR', class: 'bg-blue-500/15 text-blue-600' }
+  if (s.includes('脚本') || s.includes('Director')) return { label: '生成脚本', class: 'bg-blue-500/15 text-blue-600' }
+  if (s.includes('质检') || s.includes('Inspector')) return { label: '质检', class: 'bg-blue-500/15 text-blue-600' }
+  if (s.includes('剪辑') || s.includes('Editor')) return { label: '剪辑', class: 'bg-blue-500/15 text-blue-600' }
+  if (s.includes('完成')) return { label: '完成', class: 'bg-green-500/15 text-green-700' }
+  return { label: '处理中', class: 'bg-blue-500/15 text-blue-600' }
+}
+
 </script>
 
 <template>
@@ -356,6 +388,97 @@ const fileStatusDot: Record<string, string> = {
         </div>
       </div>
     </section>
+
+    <!-- Batch Queue Panel (right sidebar) -->
+    <transition name="slide-right">
+      <section
+        v-if="showQueuePanel && store.isBatchMode"
+        class="w-72 flex flex-col bg-surface-container-lowest rounded-xl border border-outline-variant/15 overflow-hidden shrink-0"
+      >
+        <!-- Header -->
+        <div class="px-4 py-3 border-b border-outline-variant/10 flex items-center justify-between">
+          <div>
+            <h3 class="text-xs font-bold text-on-surface uppercase tracking-wider">批量队列</h3>
+            <p class="text-[10px] text-on-surface-variant mt-0.5">
+              已完成 {{ store.batchDoneCount }} / 共 {{ store.files.length }} 个视频
+              <span v-if="store.batchFailCount > 0" class="text-red-500 ml-1">{{ store.batchFailCount }} 失败</span>
+            </p>
+          </div>
+          <button
+            class="p-1 text-on-surface-variant/50 hover:text-on-surface hover:bg-surface-container rounded-md transition-colors"
+            title="关闭队列面板"
+            @click="showQueuePanel = false"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <!-- Overall progress bar -->
+        <div class="px-4 py-2" v-if="store.isProcessing">
+          <div class="bg-surface-container-high rounded-full h-1 w-full overflow-hidden">
+            <div
+              class="bg-primary h-full transition-all duration-500"
+              :style="{ width: Math.round((store.batchDoneCount / store.files.length) * 100) + '%' }"
+            ></div>
+          </div>
+        </div>
+
+        <!-- File list -->
+        <div class="flex-1 overflow-y-auto custom-scrollbar px-2 py-2 space-y-1">
+          <div
+            v-for="(file, i) in store.files"
+            :key="i"
+            class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-colors"
+            :class="{
+              'bg-blue-500/5': file.status === 'processing',
+              'bg-green-500/5': file.status === 'done',
+              'bg-red-500/5': file.status === 'error',
+            }"
+          >
+            <!-- Status icon -->
+            <div class="shrink-0">
+              <span v-if="file.status === 'processing'" class="block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
+              <span v-else-if="file.status === 'done'" class="material-symbols-outlined text-base text-green-600" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+              <span v-else-if="file.status === 'error'" class="material-symbols-outlined text-base text-red-500" style="font-variation-settings: 'FILL' 1;">error</span>
+              <span v-else class="material-symbols-outlined text-base text-slate-400">schedule</span>
+            </div>
+
+            <!-- File name + stage -->
+            <div class="flex-1 min-w-0">
+              <p class="text-[11px] font-medium text-on-surface truncate" :title="file.name">{{ file.name }}</p>
+              <p v-if="file.status === 'error'" class="text-[10px] text-red-500 truncate mt-0.5" :title="file.statusLabel">{{ file.statusLabel }}</p>
+            </div>
+
+            <!-- Stage badge -->
+            <span
+              class="shrink-0 px-2 py-0.5 text-[10px] font-bold rounded-full"
+              :class="stageBadge(file).class"
+            >{{ stageBadge(file).label }}</span>
+
+            <!-- Retry button for failed files -->
+            <button
+              v-if="file.status === 'error' && !store.isProcessing"
+              class="shrink-0 p-1 text-red-500 hover:bg-red-500/10 rounded-md transition-colors"
+              title="重试此视频"
+              @click="store.retryFailed()"
+            >
+              <span class="material-symbols-outlined text-sm">refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Footer: retry all failed -->
+        <div v-if="store.batchFailCount > 0 && !store.isProcessing" class="px-4 py-3 border-t border-outline-variant/10">
+          <button
+            class="w-full py-2 text-xs font-bold text-red-600 bg-red-500/10 rounded-lg hover:bg-red-500/20 transition-colors flex items-center justify-center gap-1.5"
+            @click="store.retryFailed()"
+          >
+            <span class="material-symbols-outlined text-sm">refresh</span>
+            重试全部失败 ({{ store.batchFailCount }})
+          </button>
+        </div>
+      </section>
+    </transition>
   </div>
 
   <!-- Footer -->

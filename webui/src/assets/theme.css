@@ -28,3 +28,14 @@ body {
   background: #c7c4d8;
   border-radius: 10px;
 }
+
+/* Batch queue panel slide-in transition */
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+.slide-right-enter-from,
+.slide-right-leave-to {
+  transform: translateX(1rem);
+  opacity: 0;
+}

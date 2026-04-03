@@ -304,6 +304,7 @@ export interface ProgressEvent {
   percent: number
   index?: number  // video index in batch
   total?: number  // total videos in batch
+  stage?: string  // pipeline stage label (e.g. "正在识别语音...")
 }
 
 export function onPipelineProgress(callback: (e: ProgressEvent) => void): () => void {
