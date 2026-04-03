@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('webui/dist', 'webui/dist'), ('config/prompts', 'config/prompts'), ('config/sensitive_words.json', 'config'), ('core/builtin_keys.py', 'core')]
 binaries = []
-hiddenimports = ['webview', 'bottle', 'certifi', 'openai', 'httpx', 'httpcore', 'pydantic', 'pydantic_settings', 'core.builtin_keys', 'psutil']
+hiddenimports = ['webview', 'bottle', 'certifi', 'openai', 'httpx', 'httpcore', 'pydantic', 'pydantic_settings', 'core.builtin_keys', 'core.bridge_api', 'core.window', 'psutil']
 tmp_ret = collect_all('webview')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pythonnet')
