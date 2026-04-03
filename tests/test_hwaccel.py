@@ -1,9 +1,13 @@
-"""Tests for core.hwaccel — GPU diagnostics, encoder detection, quality params, benchmark."""
+"""Tests for core.hwaccel — GPU diagnostics, encoder detection, quality params,
+benchmark, and encoder fallback chain."""
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 import core.hwaccel as hwaccel_mod
 from core.hwaccel import (
-    EncoderInfo, _get_gpu_name, _get_nvenc_max_sessions,
+    EncoderInfo, _ffmpeg_has_encoder, _pick_encoder,
+    _get_gpu_name, _get_nvenc_max_sessions,
     _quality_params_for, detect_best_encoder, diagnose_gpu,
     get_encoder_info, get_ffmpeg_params,
 )
@@ -170,3 +174,119 @@ class TestDetectBestEncoder:
             enc = detect_best_encoder()
         assert enc.codec == "libx264"
         hwaccel_mod._cached_encoder = None
+
+
+# -- Encoder fallback chain --------------------------------------------------
+
+
+class TestEncoderFallbackChain:
+    """Test the NVENC → QSV → AMF → libx264 fallback chain in _pick_encoder."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        hwaccel_mod._cached_encoder = None
+        yield
+        hwaccel_mod._cached_encoder = None
+
+    def _mock_has_encoder(self, available: set[str]):
+        """Return a side_effect that says 'yes' only for tokens in *available*."""
+        def fake_has(token: str) -> bool:
+            return token in available
+        return fake_has
+
+    def test_nvenc_available_picks_nvenc(self):
+        """When NVENC is available, it is chosen first (on non-darwin)."""
+        with (
+            patch("core.hwaccel.sys") as mock_sys,
+            patch("core.hwaccel._ffmpeg_has_encoder",
+                  side_effect=self._mock_has_encoder({"nvenc", "qsv", "amf"})),
+        ):
+            mock_sys.platform = "win32"
+            enc = _pick_encoder()
+        assert enc.codec == "h264_nvenc"
+        assert enc.is_hardware is True
+
+    def test_nvenc_unavailable_falls_to_qsv(self):
+        """When NVENC is missing, falls back to QSV."""
+        with (
+            patch("core.hwaccel.sys") as mock_sys,
+            patch("core.hwaccel._ffmpeg_has_encoder",
+                  side_effect=self._mock_has_encoder({"qsv", "amf"})),
+        ):
+            mock_sys.platform = "win32"
+            enc = _pick_encoder()
+        assert enc.codec == "h264_qsv"
+        assert enc.name == "Intel QuickSync"
+
+    def test_nvenc_qsv_unavailable_falls_to_amf(self):
+        """When both NVENC and QSV are missing, falls back to AMF."""
+        with (
+            patch("core.hwaccel.sys") as mock_sys,
+            patch("core.hwaccel._ffmpeg_has_encoder",
+                  side_effect=self._mock_has_encoder({"amf"})),
+        ):
+            mock_sys.platform = "win32"
+            enc = _pick_encoder()
+        assert enc.codec == "h264_amf"
+        assert enc.name == "AMD AMF"
+
+    def test_all_hw_unavailable_falls_to_libx264(self):
+        """When no hardware encoder exists, falls back to libx264."""
+        with (
+            patch("core.hwaccel.sys") as mock_sys,
+            patch("core.hwaccel._ffmpeg_has_encoder", return_value=False),
+        ):
+            mock_sys.platform = "win32"
+            enc = _pick_encoder()
+        assert enc.codec == "libx264"
+        assert enc.is_hardware is False
+        assert enc.name == "Software x264"
+
+    def test_videotoolbox_only_on_darwin(self):
+        """VideoToolbox is skipped on non-darwin platforms."""
+        with (
+            patch("core.hwaccel.sys") as mock_sys,
+            patch("core.hwaccel._ffmpeg_has_encoder",
+                  side_effect=self._mock_has_encoder({"videotoolbox"})),
+        ):
+            mock_sys.platform = "win32"
+            enc = _pick_encoder()
+        # videotoolbox available but platform is win32 → should fall to libx264
+        assert enc.codec == "libx264"
+
+    def test_videotoolbox_on_darwin(self):
+        """VideoToolbox is picked on macOS when available."""
+        with (
+            patch("core.hwaccel.sys") as mock_sys,
+            patch("core.hwaccel._ffmpeg_has_encoder",
+                  side_effect=self._mock_has_encoder({"videotoolbox", "nvenc"})),
+        ):
+            mock_sys.platform = "darwin"
+            enc = _pick_encoder()
+        assert enc.codec == "h264_videotoolbox"
+        assert enc.name == "Apple VideoToolbox"
+
+    def test_get_ffmpeg_params_uses_fallback_encoder(self):
+        """get_ffmpeg_params returns libx264 params when no HW encoder exists."""
+        sw = EncoderInfo(
+            codec="libx264", name="Software x264",
+            is_hardware=False, extra_params=["-preset", "medium"],
+        )
+        with patch("core.hwaccel.get_encoder_info", return_value=sw):
+            params = get_ffmpeg_params("high")
+        assert "-c:v" in params
+        assert "libx264" in params
+        assert "-crf" in params
+        assert "18" in params  # high quality = CRF 18
+
+    def test_ffmpeg_probe_timeout_returns_false(self):
+        """_ffmpeg_has_encoder returns False on timeout."""
+        import subprocess
+        with patch("core.hwaccel.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired("ffmpeg", 5)):
+            assert _ffmpeg_has_encoder("nvenc") is False
+
+    def test_ffmpeg_not_installed_returns_false(self):
+        """_ffmpeg_has_encoder returns False when ffmpeg is not found."""
+        with patch("core.hwaccel.subprocess.run", side_effect=FileNotFoundError):
+            assert _ffmpeg_has_encoder("nvenc") is False
