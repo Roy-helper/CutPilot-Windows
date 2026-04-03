@@ -25,8 +25,9 @@ interface PyWebViewAPI {
   get_encoder_info(): Promise<EncoderInfo>
   get_gpu_info(): Promise<GpuInfo>
   get_max_parallel(): Promise<number>
-  check_asr_status(engine?: string): Promise<{ ready: boolean; message: string }>
-  download_asr_model(engine?: string): Promise<{ success: boolean; message: string }>
+  check_asr_status(engine: string, model_size: string): Promise<{ ready: boolean; message: string }>
+  check_all_model_status(): Promise<{ tiny: boolean; small: boolean; medium: boolean }>
+  download_asr_model(engine: string, model_size: string): Promise<{ success: boolean; message: string }>
   run_benchmark(): Promise<BenchmarkResult>
   preview_video(filePath: string): Promise<{ success: boolean; error?: string }>
   get_output_files(videoPath: string): Promise<OutputFile[]>
@@ -267,14 +268,19 @@ export async function exportVersions(
     : (await httpCall('export_versions', videoPath, versionIds, options) ?? { success: false })
 }
 
-export async function checkAsrStatus(engine?: string): Promise<{ ready: boolean; message: string }> {
+export async function checkAsrStatus(engine?: string, modelSize?: string): Promise<{ ready: boolean; message: string }> {
   const api = await waitForApi()
-  return api ? await api.check_asr_status(engine ?? '') : (await httpCall('check_asr_status', engine ?? '') ?? { ready: false, message: '后端未连接' })
+  return api ? await api.check_asr_status(engine ?? '', modelSize ?? '') : (await httpCall('check_asr_status', engine ?? '', modelSize ?? '') ?? { ready: false, message: '后端未连接' })
 }
 
-export async function downloadAsrModel(engine?: string): Promise<{ success: boolean; message: string }> {
+export async function checkAllModelStatus(): Promise<{ tiny: boolean; small: boolean; medium: boolean }> {
   const api = await waitForApi()
-  return api ? await api.download_asr_model(engine ?? '') : (await httpCall('download_asr_model', engine ?? '') ?? { success: false, message: '后端未连接' })
+  return api ? await api.check_all_model_status() : (await httpCall('check_all_model_status') ?? { tiny: false, small: false, medium: false })
+}
+
+export async function downloadAsrModel(engine?: string, modelSize?: string): Promise<{ success: boolean; message: string }> {
+  const api = await waitForApi()
+  return api ? await api.download_asr_model(engine ?? '', modelSize ?? '') : (await httpCall('download_asr_model', engine ?? '', modelSize ?? '') ?? { success: false, message: '后端未连接' })
 }
 
 export async function runBenchmark(): Promise<BenchmarkResult> {

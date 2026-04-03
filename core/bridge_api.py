@@ -103,31 +103,51 @@ class PythonBridge:
 
     # ── ASR Status ───────────────────────────────────────────
 
-    def check_asr_status(self, engine: str = "") -> dict:
+    def check_asr_status(self, engine: str = "", model_size: str = "") -> dict:
         """Check if ASR model is downloaded and ready.
 
         Args:
             engine: "faster-whisper" or "funasr". If empty, reads from user settings.
+            model_size: "tiny", "small", or "medium". If empty, reads from user settings.
         """
         try:
+            from core.user_settings import load_user_settings
+            settings = load_user_settings()
             if not engine:
-                from core.user_settings import load_user_settings
-                engine = load_user_settings().get("asr_engine", "faster-whisper")
+                engine = settings.get("asr_engine", "faster-whisper")
+            if not model_size:
+                model_size = settings.get("asr_model_size", "small")
             from core.asr import get_model_status
-            return get_model_status(engine=engine)
+            return get_model_status(engine=engine, model_size=model_size)
         except Exception as e:
             return {"ready": False, "message": str(e)}
 
-    def download_asr_model(self, engine: str = "") -> dict:
+    def check_all_model_status(self) -> dict:
+        """Return download status for every faster-whisper model size.
+
+        Returns:
+            {"tiny": bool, "small": bool, "medium": bool}
+        """
+        from core.asr import get_model_status
+        return {
+            sz: get_model_status(engine="faster-whisper", model_size=sz)["ready"]
+            for sz in ("tiny", "small", "medium")
+        }
+
+    def download_asr_model(self, engine: str = "", model_size: str = "") -> dict:
         """Download ASR model for the given engine.
 
         Args:
             engine: "faster-whisper" or "funasr". If empty, reads from user settings.
+            model_size: "tiny", "small", or "medium". If empty, reads from user settings.
         """
         try:
+            from core.user_settings import load_user_settings
+            settings = load_user_settings()
             if not engine:
-                from core.user_settings import load_user_settings
-                engine = load_user_settings().get("asr_engine", "faster-whisper")
+                engine = settings.get("asr_engine", "faster-whisper")
+            if not model_size:
+                model_size = settings.get("asr_model_size", "small")
 
             def on_progress(percent: int) -> None:
                 if self._window:
@@ -137,7 +157,7 @@ class PythonBridge:
                     )
 
             from core.asr import download_model
-            return download_model(engine=engine, on_progress=on_progress)
+            return download_model(engine=engine, on_progress=on_progress, model_size=model_size)
         except Exception as e:
             logger.exception("模型下载失败")
             return {"success": False, "message": f"下载失败: {e}"}

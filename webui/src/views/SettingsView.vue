@@ -5,7 +5,7 @@ import TopBar from '@/components/TopBar.vue'
 import {
   getMachineId, getLicenseInfo, activateLicense, loadSettings, saveSettings as bridgeSave,
   getProviders as bridgeProviders, testConnection as bridgeTest,
-  selectDirectory, getGpuInfo, getMaxParallel, checkAsrStatus, downloadAsrModel, onDownloadProgress, exportLogs,
+  selectDirectory, getGpuInfo, getMaxParallel, checkAsrStatus, checkAllModelStatus, downloadAsrModel, onDownloadProgress, exportLogs,
   type ProviderPreset,
 } from '@/bridge'
 
@@ -55,6 +55,7 @@ const gpuIsHardware = ref(false)
 const asrEngine = ref('faster-whisper')
 const asrModelSize = ref('small')
 const asrModelReady = ref(false)
+const modelDownloaded = ref<Record<string, boolean>>({ tiny: false, small: false, medium: false })
 const asrDownloading = ref(false)
 const asrDownloadMsg = ref('')
 const asrDownloadPercent = ref(0)
@@ -102,8 +103,12 @@ onMounted(async () => {
   } catch { /* dev mode */ }
 
   try {
-    const asr = await checkAsrStatus(asrEngine.value)
+    const asr = await checkAsrStatus(asrEngine.value, asrModelSize.value)
     asrModelReady.value = asr.ready
+    if (asrEngine.value === 'faster-whisper') {
+      const statuses = await checkAllModelStatus()
+      modelDownloaded.value = statuses
+    }
   } catch { /* dev mode */ }
 
   // Mark clean after initial load, then watch for changes
@@ -158,9 +163,14 @@ async function handleAsrDownload() {
     asrDownloadMsg.value = `正在下载语音模型... ${e.percent}%`
   })
   try {
-    const res = await downloadAsrModel(asrEngine.value)
+    const res = await downloadAsrModel(asrEngine.value, asrModelSize.value)
     asrDownloadMsg.value = res.message
     asrModelReady.value = res.success
+    // Refresh all model statuses after download
+    if (asrEngine.value === 'faster-whisper') {
+      const statuses = await checkAllModelStatus()
+      modelDownloaded.value = statuses
+    }
   } finally {
     removeListener()
     asrDownloading.value = false
@@ -177,7 +187,20 @@ async function handleExportLogs() {
 async function handleEngineChange() {
   asrDownloadMsg.value = ''
   try {
-    const asr = await checkAsrStatus(asrEngine.value)
+    const asr = await checkAsrStatus(asrEngine.value, asrModelSize.value)
+    asrModelReady.value = asr.ready
+    if (asrEngine.value === 'faster-whisper') {
+      const statuses = await checkAllModelStatus()
+      modelDownloaded.value = statuses
+    }
+  } catch { /* dev mode */ }
+}
+
+async function handleModelSizeChange(sz: string) {
+  asrModelSize.value = sz
+  asrDownloadMsg.value = ''
+  try {
+    const asr = await checkAsrStatus(asrEngine.value, sz)
     asrModelReady.value = asr.ready
   } catch { /* dev mode */ }
 }
@@ -330,10 +353,13 @@ async function browseOutputDir() {
                 <button
                   v-for="sz in [{id:'tiny',label:'Tiny (快速)'},{id:'small',label:'Small (默认)'},{id:'medium',label:'Medium (精准)'}]"
                   :key="sz.id"
-                  class="flex-1 py-2 text-xs font-bold rounded-md transition-all"
+                  class="flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5"
                   :class="asrModelSize === sz.id ? 'bg-white shadow-sm text-primary' : ''"
-                  @click="asrModelSize = sz.id"
-                >{{ sz.label }}</button>
+                  @click="handleModelSizeChange(sz.id)"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full" :class="modelDownloaded[sz.id] ? 'bg-green-500' : 'bg-slate-400'"></span>
+                  {{ sz.label }}
+                </button>
               </div>
             </div>
             <!-- ASR model status -->
@@ -347,7 +373,7 @@ async function browseOutputDir() {
                   class="text-xs font-bold text-primary hover:underline"
                   :disabled="asrDownloading"
                   @click="handleAsrDownload"
-                >{{ asrDownloading ? '下载中...' : asrEngine === 'funasr' ? '下载 FunASR (~2GB)' : '下载 (461MB)' }}</button>
+                >{{ asrDownloading ? '下载中...' : asrEngine === 'funasr' ? '下载 FunASR (~2GB)' : `下载 ${asrModelSize} (${{tiny:'75MB',small:'461MB',medium:'1.5GB'}[asrModelSize] ?? '461MB'})` }}</button>
               </div>
             </div>
             <!-- Download progress bar -->

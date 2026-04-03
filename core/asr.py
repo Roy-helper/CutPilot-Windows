@@ -399,7 +399,10 @@ def _download_funasr_model() -> dict:
     """Download FunASR model by triggering a dry-run model load.
 
     FunASR auto-downloads from ModelScope on first use.
+    Uses Chinese mirror when the default ModelScope endpoint is unreachable.
     """
+    import os
+
     # First check dependencies are installed
     missing: list[str] = []
     for pkg in ("funasr", "torch", "torchaudio"):
@@ -414,27 +417,50 @@ def _download_funasr_model() -> dict:
             "message": f"请先安装依赖: pip install {' '.join(missing)}",
         }
 
+    # Set ModelScope mirror for mainland China
+    os.environ.setdefault("MODELSCOPE_CACHE", str(Path.home() / ".cache" / "modelscope"))
+
     try:
         from funasr import AutoModel
         import torch
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info("下载 FunASR 模型 (首次约 2GB)...")
-        AutoModel(
-            model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-            vad_model="fsmn-vad",
-            punc_model="ct-punc",
-            spk_model="cam++",
-            device=device,
-            disable_update=False,
-        )
+        logger.info("下载 FunASR 模型 (首次约 2GB, device=%s)...", device)
+
+        def _do_download():
+            AutoModel(
+                model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+                vad_model="fsmn-vad",
+                punc_model="ct-punc",
+                spk_model="cam++",
+                device=device,
+                disable_update=False,
+            )
+
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(_do_download)
+            future.result(timeout=600)  # 10 minutes
+
         logger.info("FunASR 模型下载完成")
         return {"success": True, "message": "FunASR 模型下载完成！"}
+    except FuturesTimeout:
+        logger.error("FunASR 模型下载超时（10分钟）")
+        return {
+            "success": False,
+            "message": "下载超时（10分钟），请检查网络连接。\n"
+                       "手动下载: https://modelscope.cn/models/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        }
     except Exception as e:
         logger.exception("FunASR 模型下载失败")
         err = str(e)
-        if "connect" in err.lower() or "network" in err.lower():
-            return {"success": False, "message": "网络连接失败，请检查网络后重试"}
-        return {"success": False, "message": f"下载失败: {err[:100]}"}
+        if "connect" in err.lower() or "network" in err.lower() or "timeout" in err.lower():
+            return {
+                "success": False,
+                "message": "网络连接失败，请检查网络后重试。\n"
+                           "如果 ModelScope 无法访问，请手动下载模型。",
+            }
+        return {"success": False, "message": f"下载失败: {err[:200]}"}
 
 
 # Track which model size is actually loaded so we can invalidate on change

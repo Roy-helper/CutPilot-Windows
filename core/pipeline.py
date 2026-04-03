@@ -189,6 +189,7 @@ async def _run_asr(
     on_progress: Callable[[str, int], None] | None,
 ) -> list[Sentence]:
     """Run ASR with caching."""
+    import time as _time
     _report_progress(on_progress, "正在识别语音...", 10)
 
     if cache.exists(video_path, "asr"):
@@ -202,6 +203,7 @@ async def _run_asr(
 
     from core.asr import transcribe_video
 
+    t0 = _time.monotonic()
     segments = await transcribe_video(
         str(video_path), hotwords=hotwords,
         enable_diarization=config.enable_speaker_diarization,
@@ -209,6 +211,7 @@ async def _run_asr(
         model_size=getattr(config, "asr_model_size", "small"),
         on_progress=on_progress,
     )
+    asr_elapsed = _time.monotonic() - t0
     sentences = [
         Sentence(
             id=i + 1,
@@ -221,7 +224,7 @@ async def _run_asr(
     ]
 
     cache.save(video_path, "asr", [s.model_dump() for s in sentences])
-    logger.info("ASR complete: %d sentences", len(sentences))
+    logger.info("ASR complete: %d sentences in %.1fs", len(sentences), asr_elapsed)
     _report_progress(on_progress, "语音识别完成", 30)
     return sentences
 
@@ -234,6 +237,7 @@ async def _run_director(
     on_progress: Callable[[str, int], None] | None,
 ) -> list[ScriptVersion]:
     """Run AI director with caching."""
+    import time as _time
     _report_progress(on_progress, "AI 正在生成脚本...", 35)
 
     if cache.exists(video_path, "director"):
@@ -243,13 +247,15 @@ async def _run_director(
 
     from core.director import generate_versions
 
+    t0 = _time.monotonic()
     versions = await generate_versions(
         sentences, config, version_count=config.max_versions,
     )
+    director_elapsed = _time.monotonic() - t0
 
     _report_progress(on_progress, "脚本生成完成，解析中...", 50)
     cache.save(video_path, "director", [v.model_dump() for v in versions])
-    logger.info("Director complete: %d versions", len(versions))
+    logger.info("Director complete: %d versions in %.1fs", len(versions), director_elapsed)
     return versions
 
 
@@ -289,15 +295,18 @@ async def _run_editor(
     cancel_event: threading.Event | None = None,
 ) -> list[dict]:
     """Run editor (no caching — always regenerate video files)."""
+    import time as _time
     _report_progress(on_progress, "正在剪辑视频...", 70)
 
     from core.editor import cut_versions
 
+    t0 = _time.monotonic()
     output_files = await cut_versions(
         video_path, approved, sentences, config,
         cancel_event=cancel_event,
     )
-    logger.info("Editor complete: %d output files", len(output_files))
+    editor_elapsed = _time.monotonic() - t0
+    logger.info("Editor complete: %d output files in %.1fs", len(output_files), editor_elapsed)
     _report_progress(on_progress, f"剪辑完成，{len(output_files)} 个文件", 95)
     return output_files
 
