@@ -7,8 +7,8 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
   selectFiles, processBatch, exportVersions, getEncoderInfo, getMaxParallel,
-  previewVideo, openFolder, checkAsrStatus, runBenchmark, generateThumbnail,
-  cancelProcessing,
+  previewVideo, openFolder, checkAsrStatus, checkAllModelStatus, runBenchmark,
+  generateThumbnail, cancelProcessing, loadSettings,
   type ProcessResult, type EncoderInfo,
 } from '@/bridge'
 import { useNotificationStore } from './notifications'
@@ -50,6 +50,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const maxParallel = ref(2)
   const encoderDetected = ref(false)
 
+  // ASR model readiness
+  const asrModelReady = ref(true) // optimistic default until checked
+  const asrModelChecked = ref(false)
+  const asrDownloading = ref(false)
+  let _asrPollTimer: ReturnType<typeof setInterval> | null = null
+
   // Computed helpers
   const pendingFiles = computed(() => files.value.filter(f => f.status === 'pending' || f.status === 'error'))
   const selectedVersions = computed(() => versions.value.filter(v => v.selected))
@@ -63,6 +69,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     encoderName.value = bench.is_hardware ? `${bench.encoder} (硬件加速)` : bench.encoder
     maxParallel.value = bench.max_parallel
     encoderDetected.value = true
+    // Initial ASR model check
+    await refreshAsrStatus()
+  }
+
+  async function refreshAsrStatus() {
+    try {
+      const settings = await loadSettings()
+      const engine = (settings.asr_engine as string) || 'faster-whisper'
+      const modelSize = (settings.asr_model_size as string) || 'small'
+      const status = await checkAsrStatus(engine, modelSize)
+      asrModelReady.value = status.ready
+      asrModelChecked.value = true
+
+      // If not ready, start polling every 5s until it becomes ready
+      if (!status.ready && !_asrPollTimer) {
+        _startAsrPoll(engine, modelSize)
+      }
+      if (status.ready && _asrPollTimer) {
+        clearInterval(_asrPollTimer)
+        _asrPollTimer = null
+      }
+    } catch { /* dev mode */ }
+  }
+
+  function _startAsrPoll(engine: string, modelSize: string) {
+    _asrPollTimer = setInterval(async () => {
+      try {
+        const status = await checkAsrStatus(engine, modelSize)
+        asrModelReady.value = status.ready
+        if (status.ready && _asrPollTimer) {
+          clearInterval(_asrPollTimer)
+          _asrPollTimer = null
+        }
+      } catch { /* ignore */ }
+    }, 5000)
   }
 
   async function importFiles() {
@@ -314,6 +355,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const failedFiles = computed(() => files.value.filter(f => f.status === 'error'))
+
+  const generateDisabledReason = computed<string>(() => {
+    if (pendingFiles.value.length === 0) return '请先导入视频文件'
+    if (!asrModelChecked.value) return ''  // still loading, don't block yet
+    if (!asrModelReady.value) return '请先在设置页下载语音模型'
+    return ''
+  })
   const isBatchMode = computed(() => files.value.length > 1 && (isProcessing.value || files.value.some(f => f.status !== 'pending')))
   const batchDoneCount = computed(() => files.value.filter(f => f.status === 'done').length)
   const batchFailCount = computed(() => files.value.filter(f => f.status === 'error').length)
@@ -393,10 +441,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   return {
     files, versions, progress, progressText, isProcessing, isExporting,
-    encoderName, maxParallel,
+    encoderName, maxParallel, asrModelReady, generateDisabledReason,
     pendingFiles, failedFiles, isBatchMode, batchDoneCount, batchFailCount,
     selectedVersions, hasFiles, hasVersions,
-    detectEncoder, importFiles, addDroppedFiles, generate, cancelGenerate,
-    retryFailed, exportSelected, clear, updateFileProgress, preview, openOutputFolder,
+    detectEncoder, refreshAsrStatus, importFiles, addDroppedFiles, generate,
+    cancelGenerate, retryFailed, exportSelected, clear, updateFileProgress,
+    preview, openOutputFolder,
   }
 })

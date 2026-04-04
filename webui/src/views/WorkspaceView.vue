@@ -186,10 +186,11 @@ function stageBadge(file: { status: string; stage: string }): { label: string; c
       ><span class="material-symbols-outlined text-base">stop_circle</span>取消处理</button>
       <button
         v-else
-        class="px-6 py-2 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 bg-gradient-to-b from-primary to-primary-container"
-        :disabled="store.pendingFiles.length === 0"
+        class="px-6 py-2 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-b from-primary to-primary-container"
+        :disabled="store.pendingFiles.length === 0 || !store.asrModelReady"
+        :title="store.generateDisabledReason"
         @click="store.generate()"
-      >一键生成</button>
+      >{{ !store.asrModelReady && store.pendingFiles.length > 0 ? '模型未就绪' : '一键生成' }}</button>
     </template>
   </TopBar>
 
